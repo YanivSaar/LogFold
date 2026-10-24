@@ -22,7 +22,7 @@ use crossterm::terminal::{
 use crossterm::{execute, ExecutableCommand};
 use parking_lot::Mutex;
 use ratatui::prelude::*;
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Clear, Paragraph};
 
 use crate::engine::pattern::PatternSnapshot;
 use crate::engine::registry::PatternRegistry;
@@ -488,7 +488,14 @@ fn run_loop(
                         app.handle_key(key.code, key.modifiers);
                     }
                     Event::Mouse(m) => app.handle_mouse(m.kind),
-                    Event::Resize(_, _) => app.dirty = true,
+                    Event::Resize(_, _) => {
+                        // Resize can leave the backing buffer sized to
+                        // the old area, so a full clear ensures the
+                        // new frame starts from an empty terminal and
+                        // we don't inherit garbage from the old layout.
+                        let _ = guard.terminal.clear();
+                        app.dirty = true;
+                    }
                     _ => {}
                 }
                 // Peek without blocking; break when the burst's drained.
@@ -522,6 +529,17 @@ fn run_loop(
 
 fn render(frame: &mut Frame<'_>, app: &App) {
     let area = frame.area();
+
+    // Blank the whole frame every tick: ratatui diffs cells against
+    // the prior buffer, but a stale alt-screen (screen/tmux, terminals
+    // that don't honour EnterAlternateScreen) or a view switch that
+    // paints a smaller area than the previous view can leave old cells
+    // on screen. Clear + full-area background block forces every cell
+    // to be rewritten with our theme bg, so shell content and the
+    // previous view can never bleed through.
+    frame.render_widget(Clear, area);
+    frame.render_widget(Block::default().style(theme::body_style()), area);
+
     let chunks = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(0),
@@ -529,13 +547,16 @@ fn render(frame: &mut Frame<'_>, app: &App) {
     ])
     .split(area);
 
-    // Header tabs.
-    let tab_text = format!(
+    // Header tabs. Pad to the full width so the header style's
+    // background colour reaches both edges (ratatui's Paragraph does
+    // not auto-pad trailing cells, which is why unpainted cells on the
+    // right were taking on whatever was there before).
+    let header_body = format!(
         " logfold v{}   [1] Overview  [2] Detail  [3] Sources  [4] Timeline   ← {} ",
         env!("CARGO_PKG_VERSION"),
         app.view.label()
     );
-    let tabs = Paragraph::new(tab_text).style(theme::header_style());
+    let tabs = Paragraph::new(header_body).style(theme::header_style());
     frame.render_widget(tabs, chunks[0]);
 
     match app.view {
@@ -577,7 +598,14 @@ impl TerminalGuard {
         stdout.execute(EnterAlternateScreen)?;
         let _ = stdout.execute(EnableMouseCapture);
         let backend = CrosstermBackend::new(stdout);
-        let terminal = Terminal::new(backend)?;
+        let mut terminal = Terminal::new(backend)?;
+        // Blank the alt screen explicitly: some terminals (notably
+        // GNU screen without altscreen on, or passthroughs) will leave
+        // the previous content visible. Ratatui's diff-based renderer
+        // would then only overwrite cells it touches, letting shell
+        // output show through transparent gaps. clear() guarantees a
+        // clean slate before the first draw.
+        terminal.clear().context("clearing terminal")?;
         Ok(TerminalGuard {
             terminal,
             mouse_enabled: true,
@@ -594,6 +622,12 @@ impl Drop for TerminalGuard {
         let _ = disable_raw_mode();
         let _ = self.terminal.show_cursor();
         let _ = execute!(io::stdout(), Show);
+        // Terminals that don't honour the alt-screen leave the cursor
+        // somewhere mid-row and the next shell prompt lands on top of
+        // leftover TUI content. A trailing newline parks the cursor
+        // at column 0 of a fresh line.
+        use std::io::Write;
+        let _ = writeln!(io::stdout());
     }
 }
 

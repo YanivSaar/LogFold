@@ -21,7 +21,7 @@ use crate::types::TokenType;
 pub fn classify<'a>(line: &'a str, out: &mut Vec<Token<'a>>) {
     out.clear();
     for raw in line.split_ascii_whitespace() {
-        let piece = strip_trailing_punct(raw);
+        let piece = strip_wrapping_punct(raw);
         if piece.is_empty() || contains_control(piece) {
             continue;
         }
@@ -38,9 +38,15 @@ fn contains_control(s: &str) -> bool {
         .any(|b| b < 0x20 && b != b'\t' || b == 0x7f /* DEL */)
 }
 
+/// Strip wrapping punctuation from both ends, so bracketed stamps like
+/// `[1.319177]`, parenthesised ids like `(abc-def)` and trailing
+/// clause-enders become classifiable. URLs/paths are already caught
+/// by their leading-slash/scheme predicates, so stripping outer
+/// `[({<"'` won't disturb them.
 #[inline]
-fn strip_trailing_punct(s: &str) -> &str {
-    s.trim_end_matches(['.', ',', ';', ':', '!', '?'])
+fn strip_wrapping_punct(s: &str) -> &str {
+    s.trim_matches(['[', ']', '(', ')', '{', '}', '<', '>', '"', '\''])
+        .trim_end_matches(['.', ',', ';', ':', '!', '?'])
 }
 
 /// Classify a single whitespace-delimited piece.
@@ -191,6 +197,30 @@ fn is_date_like(s: &str) -> bool {
             .chain(&s.as_bytes()[6..8])
             .all(|b| b.is_ascii_digit());
     }
+    // HH:MM:SS.sss or HH:MM:SS,sss  (common in syslog/apps)
+    if s.len() >= 10
+        && s.as_bytes()[2] == b':'
+        && s.as_bytes()[5] == b':'
+        && (s.as_bytes()[8] == b'.' || s.as_bytes()[8] == b',')
+    {
+        return s.as_bytes()[0..2].iter().all(|b| b.is_ascii_digit())
+            && s.as_bytes()[3..5].iter().all(|b| b.is_ascii_digit())
+            && s.as_bytes()[6..8].iter().all(|b| b.is_ascii_digit());
+    }
+    // Kernel / dmesg uptime stamp: digits '.' digits with microsecond
+    // precision. Examples: `1.319177`, `41.316966`, `12345.678901`.
+    // Require exactly one dot and 6+ fractional digits so plain decimals
+    // (`1.5`, `3.14159`) stay NUM.
+    if let Some(dot) = s.find('.') {
+        let (int, frac) = (&s[..dot], &s[dot + 1..]);
+        if !int.is_empty()
+            && frac.len() >= 6
+            && int.bytes().all(|b| b.is_ascii_digit())
+            && frac.bytes().all(|b| b.is_ascii_digit())
+        {
+            return true;
+        }
+    }
     // syslog-style month abbrev (Oct, Nov, …) is a plain WORD; the day/time
     // tokens following are caught by the HH:MM:SS branch above.
     false
@@ -265,6 +295,48 @@ mod tests {
         let mut buf = Vec::new();
         classify("   \t  ", &mut buf);
         assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn kernel_uptime_is_date() {
+        // dmesg format: `[    1.319177] kernel: ...`
+        let mut buf = Vec::new();
+        classify("[    1.319177] kernel vmentry_ctrl", &mut buf);
+        let types: Vec<_> = buf.iter().map(|t| t.ty).collect();
+        // `[    1.319177]` strips to `1.319177` → Date; rest Words.
+        assert_eq!(
+            types,
+            vec![TokenType::Date, TokenType::Word, TokenType::Word]
+        );
+    }
+
+    #[test]
+    fn wrapping_brackets_stripped() {
+        assert_eq!(classify_one("[192.168.1.1]"), TokenType::Word); // not stripped by classify_one
+        let mut buf = Vec::new();
+        classify("peer [192.168.1.1] joined", &mut buf);
+        let got: Vec<_> = buf.iter().map(|t| (t.ty, t.text)).collect();
+        assert_eq!(
+            got,
+            vec![
+                (TokenType::Word, "peer"),
+                (TokenType::Ip, "192.168.1.1"),
+                (TokenType::Word, "joined"),
+            ]
+        );
+    }
+
+    #[test]
+    fn plain_decimals_stay_word() {
+        // Short-fraction decimals must NOT be classified as Date.
+        assert_eq!(classify_one("1.5"), TokenType::Word);
+        assert_eq!(classify_one("3.14159"), TokenType::Word);
+    }
+
+    #[test]
+    fn ms_fractional_time_is_date() {
+        assert_eq!(classify_one("12:34:56.789"), TokenType::Date);
+        assert_eq!(classify_one("12:34:56,789"), TokenType::Date);
     }
 
     #[test]

@@ -156,7 +156,12 @@ impl OverviewState {
 }
 
 pub fn render(frame: &mut Frame<'_>, area: Rect, state: &OverviewState) {
-    let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
+    // One-line banner above the table. The old Length(3) layout left
+    // two blank rows that ratatui never actively painted; on a view
+    // switch those cells kept whatever the previous view drew, which
+    // read as "hpatterns" / "SCORE 6COUNT" glyphs leaking into the
+    // table border.
+    let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(area);
 
     let header_text = format!(
         " ANOMALIES ─ {} items (score ≥ threshold) ",
