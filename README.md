@@ -90,7 +90,42 @@ Optional features:
 | `clipboard`   | copy a pattern or line to the clipboard        |
 
 
-### Pre-built binaries (recommended)
+### Quick install (one-liner)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/YanivSaar/LogFold/main/install.sh | bash
+```
+
+The script detects your OS and architecture, downloads the latest
+release tarball, verifies the SHA-256, and installs to
+`/usr/local/bin` (or `$HOME/.local/bin` if `/usr/local` isn't
+writable).
+
+Environment knobs (prepend to the `bash` call):
+
+| Variable           | Default           | Meaning                                 |
+|--------------------|-------------------|-----------------------------------------|
+| `LOGFOLD_VERSION`  | latest release    | Pin a specific tag, e.g. `v0.1.0`.      |
+| `LOGFOLD_PREFIX`   | autodetected      | Install prefix (`bin` suffix is added). |
+| `LOGFOLD_DRY_RUN`  | `0`               | `1` only downloads and verifies.        |
+
+Example pinned install into `$HOME/.local`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/YanivSaar/LogFold/main/install.sh \
+  | LOGFOLD_VERSION=v0.1.0 LOGFOLD_PREFIX="$HOME/.local" bash
+```
+
+If you don't want to pipe to bash, download and read it first:
+
+```sh
+curl -fsSL -o install.sh https://raw.githubusercontent.com/YanivSaar/LogFold/main/install.sh
+less install.sh
+bash install.sh
+```
+
+
+### Pre-built binaries (manual)
 
 Static Linux and macOS binaries are published on the
 [releases page](https://github.com/YanivSaar/LogFold/releases).

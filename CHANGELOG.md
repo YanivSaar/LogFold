@@ -11,16 +11,27 @@ CLI surface and bundle schema.
 ### Added
 - `.github/workflows/ci.yml` runs fmt, clippy, tests on Linux and
   macOS, MSRV check against Rust 1.75, musl build sanity check,
-  and `cargo audit` on every push and PR to main.
+  and `cargo audit` (continue-on-error, advisory) on every push
+  and PR to main.
 - `.github/workflows/release.yml` cross-compiles for six targets
   (`x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`,
   `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`,
   `x86_64-apple-darwin`, `aarch64-apple-darwin`) on tag push,
   gates on a format/clippy/test pre-release pass, uploads
-  tarballs with SHA-256 checksums to the GitHub Release.
+  tarballs with SHA-256 checksums plus `install.sh` to the
+  GitHub Release.
 - `.github/workflows/audit.yml` runs a weekly cargo-audit and
-  cargo-outdated check.
+  cargo-outdated check (strict, opens issues).
 - `.github/dependabot.yml` groups patch and minor updates weekly.
+- `install.sh` one-liner installer that detects OS/arch, pulls
+  the matching release tarball, verifies SHA-256, and installs
+  to `/usr/local/bin` or `$HOME/.local/bin`. Served from main
+  and included in every release.
+
+### Fixed
+- `--no-default-features` build broken by unused `AtomicBool`,
+  `Ordering`, and `Arc` imports plus a dead `ctrlc_once` function.
+  All now feature-gated behind the modules that use them.
 
 
 ## [0.1.0] - 2026-10-24
