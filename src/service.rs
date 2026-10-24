@@ -180,22 +180,25 @@ pub fn is_installed() -> bool {
 // ---- helpers ----
 
 fn require_root() -> Result<()> {
-    // No FFI (`#![forbid(unsafe_code)]` in lib.rs forbids libc
-    // bindings). Read the current uid out of /proc/self/status
-    // instead - works on every Linux distro that ships systemd.
-    let is_root = std::fs::read_to_string("/proc/self/status")
-        .unwrap_or_default()
-        .lines()
-        .find(|l| l.starts_with("Uid:"))
-        .and_then(|l| l.split_whitespace().nth(1))
-        .map(|u| u == "0")
-        .unwrap_or(false);
-    if !is_root {
+    if !is_root() {
         color_eyre::eyre::bail!(
             "--install-service / --uninstall-service must run as root (try `sudo logfold ...`)"
         );
     }
     Ok(())
+}
+
+/// Is the current process running as root? Reads `/proc/self/status`
+/// rather than binding to libc so the `#![forbid(unsafe_code)]`
+/// invariant holds for the whole crate.
+pub fn is_root() -> bool {
+    std::fs::read_to_string("/proc/self/status")
+        .unwrap_or_default()
+        .lines()
+        .find(|l| l.starts_with("Uid:"))
+        .and_then(|l| l.split_whitespace().nth(1))
+        .map(|u| u == "0")
+        .unwrap_or(false)
 }
 
 fn create_user(user: &str) -> Result<()> {

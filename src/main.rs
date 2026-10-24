@@ -133,24 +133,35 @@ struct Cli {
     #[arg(long, conflicts_with_all = ["follow", "learn", "json", "ndjson"])]
     lint: bool,
 
-    /// Remove the running binary plus user config / state. Prints
-    /// a dry-run plan and prompts for confirmation; pair with
-    /// `--yes` to skip the prompt. Operations that need sudo
-    /// (service user, systemd unit, ACLs) are printed as commands
-    /// for you to run.
-    #[arg(long, conflicts_with_all = ["follow", "learn", "lint"])]
+    /// Remove the running binary plus user config / state. When a
+    /// systemd service is installed, also stops + removes it (needs
+    /// root). Pair with `--yes` to skip confirmation, `--no-service`
+    /// to leave the service in place.
+    #[arg(long, conflicts_with_all = ["follow", "learn", "lint", "uninstall_service"])]
     uninstall: bool,
 
+    /// Remove only the systemd service (unit file, service user,
+    /// ACLs) without touching the binary or user config. Linux only.
+    /// Needs root.
+    #[arg(long, conflicts_with_all = ["follow", "learn", "lint", "uninstall"])]
+    uninstall_service: bool,
+
     /// Skip the interactive confirmation prompt for `--uninstall`
-    /// or `--install-service`.
+    /// / `--uninstall-service` / `--install-service`.
     #[arg(long)]
     yes: bool,
+
+    /// For `--uninstall`: leave the systemd service in place even
+    /// if one is detected. Useful when you want to keep the daemon
+    /// running after removing user-level files.
+    #[arg(long, requires = "uninstall")]
+    no_service: bool,
 
     /// Install logfold as a hardened systemd service: creates the
     /// service user, grants read ACLs on `--service-logs`, drops
     /// in the unit file, reloads systemd, and enables + starts.
     /// Linux only. Needs root.
-    #[arg(long, conflicts_with_all = ["follow", "learn", "lint", "uninstall"])]
+    #[arg(long, conflicts_with_all = ["follow", "learn", "lint", "uninstall", "uninstall_service"])]
     install_service: bool,
 
     /// Log files the service user should be granted read access
@@ -174,10 +185,10 @@ struct Cli {
     #[arg(long, value_name = "STRING", default_value = "")]
     service_extra: String,
 
-    /// Also tear down the systemd service when running
-    /// `--uninstall`. Stops, disables, removes the unit, drops
-    /// ACLs, deletes the service user.
-    #[arg(long, requires = "uninstall")]
+    /// Deprecated alias (pre-v0.14) for the default `--uninstall`
+    /// behaviour, which now tears the service down automatically
+    /// when one is detected. Kept so old scripts still parse.
+    #[arg(long, requires = "uninstall", hide = true)]
     with_service: bool,
 }
 
@@ -201,13 +212,21 @@ async fn main() -> Result<()> {
         return run_install_service(&cli);
     }
 
+    if cli.uninstall_service {
+        return run_uninstall_service(&cli.service_user);
+    }
+
     if cli.uninstall {
         if cli.with_service {
-            run_uninstall_service(&cli.service_user)?;
+            eprintln!(
+                "logfold: --with-service is deprecated; service tear-down now runs automatically."
+            );
         }
         return logfold::uninstall::run(logfold::uninstall::UninstallOptions {
             yes: cli.yes,
             state: cli.state.clone(),
+            no_service: cli.no_service,
+            service_user: cli.service_user.clone(),
         });
     }
 

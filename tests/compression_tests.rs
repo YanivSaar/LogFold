@@ -24,6 +24,8 @@ fn baseline_pattern_count() -> usize {
         &bundles,
         DetectConfig::default(),
         None,
+        None,
+        None,
     )
     .unwrap();
     eng.len()
@@ -50,6 +52,8 @@ fn gz_file_folds_same_as_plain() {
         &bundles,
         DetectConfig::default(),
         None,
+        None,
+        None,
     )
     .unwrap();
     assert_eq!(eng.len(), baseline_pattern_count());
@@ -75,6 +79,8 @@ fn zst_file_folds_same_as_plain() {
         &eng,
         &bundles,
         DetectConfig::default(),
+        None,
+        None,
         None,
     )
     .unwrap();

@@ -93,6 +93,11 @@ pub enum ParseFormat {
     Leef,
     /// ModSecurity v3 JSON serial (one object per transaction).
     ModsecV3,
+    /// ModSecurity v2 serial audit log (multi-section `--id-A--` …
+    /// `--id-Z--` groups). The multiline assembler joins sections
+    /// into one event; this format then plucks out the triage
+    /// fields and strips the random unique_id so entries fold.
+    ModsecSerial,
 }
 
 /// A `[[pattern]]` entry — a named canonical skeleton the engine
@@ -395,6 +400,7 @@ impl RawBundle {
             Some("cef") => ParseFormat::Cef,
             Some("leef") => ParseFormat::Leef,
             Some("modsec-v3") | Some("modsec_v3") => ParseFormat::ModsecV3,
+            Some("modsec-serial") | Some("modsec_serial") => ParseFormat::ModsecSerial,
             Some(other) => {
                 tracing::warn!(
                     bundle = %self.meta.id,

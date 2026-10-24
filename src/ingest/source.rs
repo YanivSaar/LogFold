@@ -6,7 +6,7 @@
 
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
-#[cfg(feature = "watcher")]
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -17,7 +17,7 @@ use crate::detect::probe::{Detector, Verdict};
 use crate::detect::registry::{BundleRegistry, DetectConfig, MultilineMode, ParseFormat};
 use crate::engine::registry::PatternRegistry;
 use crate::ingest::multiline::Assembler;
-use crate::parse::formats::{cef, json, kv, leef, modsec_v3, syslog};
+use crate::parse::formats::{cef, json, kv, leef, modsec_serial, modsec_v3, syslog};
 use crate::parse::skeleton::ContextRule;
 use crate::parse::{skeleton, tokenizer, Token};
 
@@ -79,6 +79,29 @@ pub struct SourceReport {
     pub verdict: Verdict,
 }
 
+/// Shared per-source progress counter. Lives longer than any single
+/// `drive_source` call so the TUI can observe partial progress of an
+/// in-flight ingest without waiting for EOF.
+///
+/// Lightweight by design: an `AtomicU64` the ingest thread bumps and
+/// the TUI reads with `Relaxed` ordering. Mismatches with the final
+/// `SourceReport.lines` by a few hundred during a race are fine —
+/// nobody looks at the running counter after EOF.
+#[derive(Debug, Default)]
+pub struct SourceProgress {
+    pub lines: AtomicU64,
+}
+
+impl SourceProgress {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn load(&self) -> u64 {
+        self.lines.load(Ordering::Relaxed)
+    }
+}
+
 /// Parsing configuration derived from the chosen bundle.
 ///
 /// Carried through the fold path so `drive_source_follow` doesn't need
@@ -111,19 +134,34 @@ impl ParseSpec {
 }
 
 /// Drive one source to EOF.
+///
+/// `shutdown` is checked between lines so a Ctrl+C / SIGTERM from the
+/// TUI aborts large ingests promptly. `progress` is bumped per line
+/// so the TUI can show a live counter before EOF.
 pub fn drive_source(
     source: &SourceKind,
     engine: &PatternRegistry,
     bundles: &BundleRegistry,
     detect_cfg: DetectConfig,
     forced_bundle: Option<&str>,
+    shutdown: Option<&Arc<AtomicBool>>,
+    progress: Option<&Arc<SourceProgress>>,
 ) -> Result<SourceReport> {
     let reader: Box<dyn BufRead> = match source {
         SourceKind::Stdin => Box::new(io::stdin().lock()),
         SourceKind::File(p) => open_file_reader(p)?,
         SourceKind::Journald { unit } => open_journald_reader(unit)?,
     };
-    drive(reader, source, engine, bundles, detect_cfg, forced_bundle)
+    drive(
+        reader,
+        source,
+        engine,
+        bundles,
+        detect_cfg,
+        forced_bundle,
+        shutdown,
+        progress,
+    )
 }
 
 /// Open a journald unit for ingest by piping `journalctl -u <unit>
@@ -304,6 +342,7 @@ pub fn drive_source_follow(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn drive(
     reader: Box<dyn BufRead>,
     source: &SourceKind,
@@ -311,6 +350,8 @@ fn drive(
     bundles: &BundleRegistry,
     detect_cfg: DetectConfig,
     forced_bundle: Option<&str>,
+    shutdown: Option<&Arc<AtomicBool>>,
+    progress: Option<&Arc<SourceProgress>>,
 ) -> Result<SourceReport> {
     let mut detector = Detector::attach(
         bundles,
@@ -327,7 +368,7 @@ fn drive(
         };
         let spec = ParseSpec::from_bundle(bundles, &verdict.bundle_id);
         let mut assembler = assembler_for(bundles, &verdict.bundle_id);
-        let lines = fold_to_eof(reader, engine, &spec, &mut assembler)?;
+        let lines = fold_to_eof(reader, engine, &spec, &mut assembler, shutdown, progress)?;
         return Ok(SourceReport {
             source: source.clone(),
             lines,
@@ -343,7 +384,7 @@ fn drive(
         };
         let spec = ParseSpec::from_bundle(bundles, &verdict.bundle_id);
         let mut assembler = assembler_for(bundles, &verdict.bundle_id);
-        let lines = fold_to_eof(reader, engine, &spec, &mut assembler)?;
+        let lines = fold_to_eof(reader, engine, &spec, &mut assembler, shutdown, progress)?;
         return Ok(SourceReport {
             source: source.clone(),
             lines,
@@ -381,7 +422,11 @@ fn drive(
             fold_one(&ev, engine, &spec);
         }
     }
-    let post = fold_to_eof(reader, engine, &spec, &mut assembler)?;
+    if let Some(p) = progress {
+        p.lines
+            .fetch_add(pending.len() as u64, Ordering::Relaxed);
+    }
+    let post = fold_to_eof(reader, engine, &spec, &mut assembler, shutdown, progress)?;
 
     Ok(SourceReport {
         source: source.clone(),
@@ -395,9 +440,15 @@ fn fold_to_eof<R: BufRead>(
     engine: &PatternRegistry,
     spec: &ParseSpec,
     assembler: &mut Assembler,
+    shutdown: Option<&Arc<AtomicBool>>,
+    progress: Option<&Arc<SourceProgress>>,
 ) -> Result<u64> {
     let mut buf = Vec::<u8>::with_capacity(1024);
     let mut lines = 0u64;
+    // Check shutdown every N lines instead of per-line. An atomic load
+    // is cheap but adding one to the inner loop still shows up on a
+    // 100M-line ingest.
+    const SHUTDOWN_POLL_INTERVAL: u64 = 1024;
     loop {
         buf.clear();
         let line = match read_bounded_line(&mut reader, &mut buf)? {
@@ -411,9 +462,22 @@ fn fold_to_eof<R: BufRead>(
             fold_one(&ev, engine, spec);
         }
         lines += 1;
+        if lines % SHUTDOWN_POLL_INTERVAL == 0 {
+            if let Some(p) = progress {
+                p.lines.store(lines, Ordering::Relaxed);
+            }
+            if let Some(sd) = shutdown {
+                if sd.load(Ordering::Relaxed) {
+                    break;
+                }
+            }
+        }
     }
     if let Some(final_ev) = assembler.drain() {
         fold_one(&final_ev, engine, spec);
+    }
+    if let Some(p) = progress {
+        p.lines.store(lines, Ordering::Relaxed);
     }
     Ok(lines)
 }
@@ -501,6 +565,7 @@ fn fold_one(line: &str, engine: &PatternRegistry, spec: &ParseSpec) {
     let owned_json: Option<String> = match spec.format {
         ParseFormat::Json => json::parse(line).map(|p| p.msg),
         ParseFormat::ModsecV3 => modsec_v3::parse(line).map(|p| p.fold_key),
+        ParseFormat::ModsecSerial => modsec_serial::parse(line).map(|p| p.fold_key),
         _ => None,
     };
     let effective: &str = match spec.format {
@@ -511,6 +576,7 @@ fn fold_one(line: &str, engine: &PatternRegistry, spec: &ParseSpec) {
         },
         ParseFormat::Json => owned_json.as_deref().unwrap_or(line),
         ParseFormat::ModsecV3 => owned_json.as_deref().unwrap_or(line),
+        ParseFormat::ModsecSerial => owned_json.as_deref().unwrap_or(line),
         ParseFormat::Kv => kv::parse(line).map(|p| p.msg).unwrap_or(line),
         ParseFormat::Cef => cef::parse(line).map(|p| p.name).unwrap_or(line),
         ParseFormat::Leef => leef::parse(line).map(|p| p.event_id).unwrap_or(line),

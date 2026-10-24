@@ -62,17 +62,26 @@ pub fn render(
         return;
     };
 
+    let triage_line = modsec_triage(snap);
+    let summary_h = if triage_line.is_some() { 6 } else { 5 };
     let chunks = Layout::vertical([
-        Constraint::Length(5),
+        Constraint::Length(summary_h),
         Constraint::Length(1),
         Constraint::Min(0),
     ])
     .split(area);
 
-    let summary = format!(
-        "skeleton : {}\nbundle   : {}\ncount    : {}  |  peak/5m : {}  |  mean/5m : {:.1}",
-        snap.skeleton, snap.bundle_id, snap.count, snap.peak_bucket, snap.mean_bucket
-    );
+    let summary = if let Some(line) = triage_line {
+        format!(
+            "ModSec   : {}\nskeleton : {}\ncount    : {}  |  peak/5m : {}  |  mean/5m : {:.1}",
+            line, snap.skeleton, snap.count, snap.peak_bucket, snap.mean_bucket
+        )
+    } else {
+        format!(
+            "skeleton : {}\nbundle   : {}\ncount    : {}  |  peak/5m : {}  |  mean/5m : {:.1}",
+            snap.skeleton, snap.bundle_id, snap.count, snap.peak_bucket, snap.mean_bucket
+        )
+    };
     let p = Paragraph::new(summary)
         .block(Block::default().borders(Borders::ALL).title(" pattern "))
         .style(theme::body_style());
@@ -98,10 +107,11 @@ pub fn render(
 
 fn render_variables(frame: &mut Frame<'_>, area: Rect, snap: &PatternSnapshot) {
     let header = Row::new(
-        ["VAR#", "TYPE", "DISTINCT", "TOTAL", "TOP VALUES"]
+        ["VAR#", "ROLE", "TYPE", "DISTINCT", "TOTAL", "TOP VALUES"]
             .iter()
             .map(|h| Cell::from(*h).style(theme::muted_style())),
     );
+    let labels = var_role_labels(snap);
     let rows: Vec<Row<'_>> = snap
         .vars
         .iter()
@@ -114,8 +124,10 @@ fn render_variables(frame: &mut Frame<'_>, area: Rect, snap: &PatternSnapshot) {
                 .map(|(k, c)| format!("{k} ({c})"))
                 .collect::<Vec<_>>()
                 .join(", ");
+            let role = labels.get(i).copied().unwrap_or("");
             Row::new(vec![
                 Cell::from(format!("{i}")),
+                Cell::from(role),
                 Cell::from(v.ty.tag()),
                 Cell::from(v.distinct_approx.to_string()),
                 Cell::from(v.total.to_string()),
@@ -128,6 +140,7 @@ fn render_variables(frame: &mut Frame<'_>, area: Rect, snap: &PatternSnapshot) {
         rows,
         [
             Constraint::Length(5),
+            Constraint::Length(10),
             Constraint::Length(8),
             Constraint::Length(10),
             Constraint::Length(10),
@@ -138,6 +151,55 @@ fn render_variables(frame: &mut Frame<'_>, area: Rect, snap: &PatternSnapshot) {
     .block(Block::default().borders(Borders::ALL).title(" variables "));
 
     frame.render_widget(table, area);
+}
+
+/// For ModSec patterns, label each `{NUM}` / `{PATH}` slot with its
+/// WAF role (rule id, URI, HTTP status) by walking the known
+/// fold-key shape. Returns an empty vec for non-ModSec patterns, so
+/// the role column stays blank.
+fn var_role_labels(snap: &PatternSnapshot) -> Vec<&'static str> {
+    let skel = snap.skeleton.as_str();
+    if !skel.starts_with("modsec ") {
+        return Vec::new();
+    }
+    // Known shape:
+    //   modsec {verdict} rule {NUM} [{SEV}]: {msg} // {METHOD} {PATH} -> {NUM}
+    // Variables, in order:
+    //   0 → rule id
+    //   1 → URI / path
+    //   2 → HTTP status
+    //
+    // When the parser folded a `pass` without a matched rule the key is
+    // `rule - [] // ...` so slot 0 is URI and slot 1 is status.
+    if skel.contains("rule - ") {
+        vec!["uri", "status"]
+    } else {
+        vec!["rule id", "uri", "status"]
+    }
+}
+
+/// If this looks like a ModSec serial pattern, build a compact
+/// triage line: verdict + top matched rule + top target URI + top
+/// status, pulled from the var top-K. Returns `None` otherwise.
+fn modsec_triage(snap: &PatternSnapshot) -> Option<String> {
+    let skel = snap.skeleton.as_str();
+    if !skel.starts_with("modsec ") {
+        return None;
+    }
+    let verdict = skel
+        .split_whitespace()
+        .nth(1)
+        .unwrap_or("?")
+        .to_ascii_uppercase();
+    let labels = var_role_labels(snap);
+    let mut parts: Vec<String> = vec![format!("verdict={verdict}")];
+    for (i, v) in snap.vars.iter().enumerate() {
+        let role = labels.get(i).copied().unwrap_or("var");
+        if let Some((top_val, c)) = v.top.first() {
+            parts.push(format!("top {role}={top_val} ({c})"));
+        }
+    }
+    Some(parts.join("  |  "))
 }
 
 fn render_score(

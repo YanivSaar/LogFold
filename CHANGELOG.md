@@ -11,6 +11,66 @@ CLI surface and bundle schema.
 (nothing yet)
 
 
+## [0.14.0] - 2026-10-24
+
+TUI stability + ModSec folding overhaul.
+
+### Added
+- **TUI smart rendering.** Draws only when state actually changed
+  (registry generation counter + reports length diff); input bursts
+  are coalesced into one frame; filter rebuilds debounced at 80 ms;
+  `build_peer_vars` cached per 500 ms refresh instead of per frame.
+  Idle CPU drops to ~0%.
+- **TUI signal handling.** SIGINT / SIGTERM / SIGHUP (not just Ctrl+C
+  as a key event) all trigger a clean shutdown that restores the
+  terminal — raw mode off, alt-screen left, cursor shown. `kill
+  $pid` no longer leaves the shell locked.
+- **Panic-safe terminal cleanup.** `TerminalGuard` RAII type runs
+  `disable_raw_mode`, `LeaveAlternateScreen`, cursor-show, and
+  `DisableMouseCapture` on `Drop` (each step independent so one
+  failure doesn't skip the rest). Panic hook now also restores the
+  cursor.
+- **Live Sources progress.** Per-source line counter advances during
+  ingest instead of waiting for EOF — a 9 MB file shows real
+  progress in the status bar.
+- **Unicode-safe status/skeleton rendering.** C0/C1 control chars
+  (including raw ANSI escapes injected via log lines) are replaced
+  with `·` before reaching the terminal. New `unicode-width` dep
+  under the `tui` feature.
+- **Overview jump keys**: `g`/`G` top/bottom, `n`/`N` next/prev
+  anomaly, `m` toggles mouse-wheel scroll capture.
+- **Help overlay redesign.** Grouped by section (Navigation / Overview
+  / Detail / Filter / Global), scrollable, dynamically sized,
+  shows only keys that actually work (removed ghost `w`/`c`/`e`/`p`
+  entries that did nothing).
+- **ModSec v2 serial fold.** New `modsec-serial` parse format strips
+  the random boundary IDs and plucks the WAF decision, rule id,
+  severity, msg, method, URI, status out of the H / A / B / F
+  sections. A 100 MB audit log that previously surfaced ~150
+  near-duplicate "patterns" at score 40 now folds to 5 meaningful
+  rows (SQL injection, RCE, XSS, path traversal, normal traffic).
+- **Detail view: ModSec triage line.** When viewing a ModSec
+  pattern, Detail shows a one-liner summarising the verdict and the
+  top matched rule / URI / status from the per-variable top-K. The
+  Variables table gains a `ROLE` column labelling each slot (`rule
+  id`, `uri`, `status`) for ModSec patterns.
+- **`--uninstall-service`** — tears down just the systemd service
+  without touching the binary or user files. Linux-only; needs root.
+- **`--uninstall` now auto-removes the service** when a unit is
+  detected (and bails with the sudo command when not root), so plain
+  `logfold --uninstall` on a service host no longer silently leaves
+  the daemon running. Opt out with `--no-service`. The old
+  `--with-service` flag is a no-op alias (hidden; prints a deprecation
+  notice).
+
+### Changed
+- `drive_source` now accepts optional `shutdown` and `progress`
+  handles so ingest threads bail cleanly between lines and feed the
+  TUI progress counter. Test callers updated.
+- `PatternRegistry::generation()` is a monotonic counter bumped on
+  every mutation; TUI uses it to skip no-op refreshes.
+
+
 ## [0.13.0] - 2026-10-24
 
 Built-in systemd service installer.

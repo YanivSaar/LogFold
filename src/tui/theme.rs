@@ -52,3 +52,11 @@ pub fn selected_style() -> Style {
         .bg(ACCENT)
         .add_modifier(Modifier::BOLD)
 }
+
+pub fn accent_border_style() -> Style {
+    Style::default().fg(ACCENT)
+}
+
+pub fn accent_style() -> Style {
+    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+}

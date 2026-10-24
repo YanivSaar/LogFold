@@ -1,6 +1,6 @@
 [package]
 name         = "logfold"
-version      = "0.13.0"
+version      = "0.14.0"
 edition      = "2021"
 rust-version = "1.75"
 description  = "Zero-config log pattern folder and anomaly detector"
@@ -15,6 +15,7 @@ categories   = ["command-line-utilities"]
 tokio             = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "fs", "net", "sync", "signal", "time"] }
 ratatui           = { version = "0.30", optional = true }
 crossterm         = { version = "0.29", optional = true }
+unicode-width     = { version = "0.2", optional = true }
 clap              = { version = "4", features = ["derive"] }
 dashmap           = "6"
 crossbeam-channel = "0.5"
@@ -53,7 +54,7 @@ bytes             = { version = "1", optional = true }
 
 [features]
 default      = ["tui", "watcher"]
-tui          = ["dep:ratatui", "dep:crossterm"]
+tui          = ["dep:ratatui", "dep:crossterm", "dep:unicode-width"]
 watcher      = ["dep:notify"]
 journald     = []
 clipboard    = ["dep:arboard"]

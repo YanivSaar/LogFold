@@ -6,8 +6,9 @@ use ratatui::widgets::{Block, Borders, Cell, Row, Table, TableState};
 use crate::engine::pattern::PatternSnapshot;
 use crate::engine::scorer;
 use crate::enrich::{self, Enricher};
+use crate::tui::format::{fmt_count, sanitize_for_display};
 use crate::tui::theme;
-use crate::types::Badge;
+use crate::types::{Badge, TokenType};
 
 pub struct OverviewState {
     pub selected: usize,
@@ -24,20 +25,33 @@ pub struct ScoredRow {
 
 impl OverviewState {
     pub fn build(snaps: &[PatternSnapshot], min_fold: u64, anomaly_threshold: u32) -> Self {
-        Self::build_filtered(snaps, min_fold, anomaly_threshold, None, &Enricher::empty())
+        let peers = scorer::build_peer_vars(snaps);
+        Self::build_filtered(
+            snaps,
+            &peers,
+            min_fold,
+            anomaly_threshold,
+            None,
+            &Enricher::empty(),
+        )
     }
 
     /// Same as [`build`] but applies an optional substring filter on
     /// the skeleton text. Case-insensitive. Keeps the anomaly /
     /// pattern partition inside the filtered set.
-    pub fn build_filtered(
-        snaps: &[PatternSnapshot],
+    ///
+    /// `peers` is caller-owned so an outer refresh loop can compute it
+    /// once per snapshot generation and reuse it for every rebuild
+    /// (filter typing, re-sort). Previously each stroke recomputed it
+    /// — the biggest TUI hot-path win.
+    pub fn build_filtered<'a>(
+        snaps: &'a [PatternSnapshot],
+        peers: &[(TokenType, &'a str)],
         min_fold: u64,
         anomaly_threshold: u32,
         filter: Option<&str>,
         enricher: &Enricher,
     ) -> Self {
-        let peers = scorer::build_peer_vars(snaps);
         let needle = filter.map(|s| s.to_ascii_lowercase());
 
         let mut scored: Vec<ScoredRow> = snaps
@@ -53,7 +67,7 @@ impl OverviewState {
             .cloned()
             .map(|snap| {
                 let score =
-                    scorer::compute_score(&snap, &peers) + enrich::score_bump(&snap, enricher);
+                    scorer::compute_score(&snap, peers) + enrich::score_bump(&snap, enricher);
                 let badge = scorer::classify_badge(&snap, score, min_fold);
                 ScoredRow { score, badge, snap }
             })
@@ -94,6 +108,48 @@ impl OverviewState {
         }
     }
 
+    pub fn jump_top(&mut self) {
+        self.selected = 0;
+    }
+
+    pub fn jump_bottom(&mut self) {
+        if !self.rows.is_empty() {
+            self.selected = self.rows.len() - 1;
+        }
+    }
+
+    /// Move selection to the next row whose score >= threshold.
+    /// Wraps. No-op if no anomalies.
+    pub fn next_anomaly(&mut self, threshold: u32) {
+        if self.rows.is_empty() {
+            return;
+        }
+        let n = self.rows.len();
+        let start = self.selected;
+        for off in 1..=n {
+            let i = (start + off) % n;
+            if self.rows[i].score >= threshold {
+                self.selected = i;
+                return;
+            }
+        }
+    }
+
+    pub fn prev_anomaly(&mut self, threshold: u32) {
+        if self.rows.is_empty() {
+            return;
+        }
+        let n = self.rows.len();
+        let start = self.selected;
+        for off in 1..=n {
+            let i = (start + n - off) % n;
+            if self.rows[i].score >= threshold {
+                self.selected = i;
+                return;
+            }
+        }
+    }
+
     pub fn selected_row(&self) -> Option<&ScoredRow> {
         self.rows.get(self.selected)
     }
@@ -124,7 +180,7 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &OverviewState) {
                 Cell::from(format!("● {:>3}", r.score)).style(score_style),
                 Cell::from(format!("{:>7}", fmt_count(r.snap.count))),
                 Cell::from(badge_label).style(theme::badge_style(r.badge.label())),
-                Cell::from(r.snap.skeleton.to_string()),
+                Cell::from(sanitize_for_display(&r.snap.skeleton)),
             ])
         })
         .collect();
@@ -145,24 +201,4 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &OverviewState) {
     let mut ts = TableState::default();
     ts.select(Some(state.selected));
     frame.render_stateful_widget(table, chunks[1], &mut ts);
-}
-
-fn fmt_count(n: u64) -> String {
-    if n < 1_000 {
-        return n.to_string();
-    }
-    let s = n.to_string();
-    let bytes = s.as_bytes();
-    let mut out = String::with_capacity(s.len() + s.len() / 3);
-    let first = bytes.len() % 3;
-    if first > 0 {
-        out.push_str(&s[..first]);
-    }
-    for (i, chunk) in s.as_bytes()[first..].chunks(3).enumerate() {
-        if i > 0 || first > 0 {
-            out.push(',');
-        }
-        out.push_str(std::str::from_utf8(chunk).unwrap());
-    }
-    out
 }

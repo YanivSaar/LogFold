@@ -4,6 +4,7 @@
 //! Insert and lookup both go through [`PatternRegistry::upsert`]. A
 //! secondary index supports fuzzy fallback for near-miss variants.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -47,6 +48,10 @@ pub struct PatternRegistry {
     patterns: DashMap<u64, Arc<Pattern>, RandomState>,
     fuzzy_index: DashMap<FuzzyKey, Mutex<SmallVec<[u64; 8]>>, RandomState>,
     max_patterns: usize,
+    /// Monotonic version bumped on every mutation. Lets observers
+    /// (TUI, metrics) ask "did anything change since my last peek?"
+    /// without cloning the snapshot.
+    generation: AtomicU64,
 }
 
 impl PatternRegistry {
@@ -56,7 +61,20 @@ impl PatternRegistry {
             patterns: DashMap::with_hasher(hasher.clone()),
             fuzzy_index: DashMap::with_hasher(hasher),
             max_patterns,
+            generation: AtomicU64::new(0),
         }
+    }
+
+    /// Monotonic version. Bumped on every successful observe / insert.
+    /// Readers compare this against the last value they saw to decide
+    /// whether to recompute derived state.
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Relaxed)
+    }
+
+    #[inline]
+    fn bump_generation(&self) {
+        self.generation.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn len(&self) -> usize {
@@ -77,6 +95,7 @@ impl PatternRegistry {
             return;
         }
         self.patterns.insert(id, pattern);
+        self.bump_generation();
     }
 
     /// Insert-or-fold a classified line.
@@ -97,6 +116,7 @@ impl PatternRegistry {
             drop(entry);
             pat.observe(now);
             extractor::ingest(&pat, slots, tokens);
+            self.bump_generation();
             return UpsertOutcome::Hit;
         }
 
@@ -112,6 +132,7 @@ impl PatternRegistry {
                     if fuzzy::is_close(&pat.skeleton, skeleton) {
                         pat.observe(now);
                         extractor::ingest(&pat, slots, tokens);
+                        self.bump_generation();
                         return UpsertOutcome::FuzzyFold;
                     }
                 }
@@ -134,7 +155,7 @@ impl PatternRegistry {
 
         // Insert (racy: another worker may have beat us; that's fine — we'll
         // discard our Arc and observe the one that won).
-        match self.patterns.entry(hash) {
+        let outcome = match self.patterns.entry(hash) {
             dashmap::mapref::entry::Entry::Occupied(occ) => {
                 let winner = occ.get().clone();
                 winner.observe(now);
@@ -156,7 +177,9 @@ impl PatternRegistry {
                 guard.push(hash);
                 UpsertOutcome::NewPattern
             }
-        }
+        };
+        self.bump_generation();
+        outcome
     }
 
     /// Snapshot the current registry contents for rendering.

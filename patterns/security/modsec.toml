@@ -27,6 +27,7 @@ line_probes = [
 probe_threshold = 0.1
 
 [parse]
+format    = "modsec-serial"
 multiline = "modsec-sections"
 
 [[pattern]]

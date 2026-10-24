@@ -19,7 +19,6 @@ pub mod types;
 pub mod uninstall;
 
 use std::path::PathBuf;
-#[cfg(any(feature = "tui", feature = "watcher"))]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -29,6 +28,8 @@ use parking_lot::Mutex;
 use crate::detect::registry::{BundleRegistry, DetectConfig};
 use crate::engine::registry::PatternRegistry;
 use crate::ingest::source::{self, SourceKind, SourceReport};
+#[cfg(feature = "tui")]
+use crate::ingest::source::SourceProgress;
 use crate::output::text::TextConfig;
 
 pub struct Config {
@@ -186,6 +187,8 @@ fn run_no_tui(
     }
 
     // --no-tui, --follow: run follow forever (user Ctrl-Cs out).
+    let shutdown = Arc::new(AtomicBool::new(false));
+    install_signal_handlers(shutdown.clone());
     for src in &cfg.sources {
         let r = source::drive_source(
             src,
@@ -193,15 +196,17 @@ fn run_no_tui(
             &bundles,
             cfg.detect.clone(),
             cfg.forced_bundle.as_deref(),
+            Some(&shutdown),
+            None,
         )?;
         reports.lock().push(r);
+        if shutdown.load(Ordering::Relaxed) {
+            break;
+        }
     }
 
     #[cfg(feature = "watcher")]
     if cfg.follow {
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let s = shutdown.clone();
-        ctrlc_once(move || s.store(true, Ordering::Relaxed));
         // Thread each follow source so a slow one doesn't starve others.
         let mut handles = Vec::new();
         for src in cfg.sources.clone() {
@@ -244,7 +249,9 @@ fn run_with_tui(
 ) -> Result<()> {
     let enricher = Arc::new(load_enricher(&cfg));
     let shutdown = Arc::new(AtomicBool::new(false));
+    install_signal_handlers(shutdown.clone());
     let mut handles = Vec::new();
+    let mut progress_handles: Vec<tui::app::ProgressHandle> = Vec::new();
 
     // One ingest thread per source. Each runs drive_source (one-shot) and —
     // if --follow is set — follows afterwards.
@@ -256,9 +263,23 @@ fn run_with_tui(
         let detect = cfg.detect.clone();
         let forced = cfg.forced_bundle.clone();
         let follow = cfg.follow;
+        let progress = Arc::new(SourceProgress::new());
+        progress_handles.push(tui::app::ProgressHandle {
+            source_label: src.label(),
+            progress: progress.clone(),
+        });
+        let progress_for_thread = progress.clone();
 
         let h = std::thread::spawn(move || -> Result<()> {
-            let r = source::drive_source(&src, &engine, &bundles, detect, forced.as_deref())?;
+            let r = source::drive_source(
+                &src,
+                &engine,
+                &bundles,
+                detect,
+                forced.as_deref(),
+                Some(&shutdown),
+                Some(&progress_for_thread),
+            )?;
             let bundle_id = r.verdict.bundle_id.clone();
             reports.lock().push(r);
             if follow {
@@ -285,6 +306,7 @@ fn run_with_tui(
         engine.clone(),
         reports,
         shutdown.clone(),
+        progress_handles,
         cfg.anomaly_threshold,
         cfg.min_fold,
         enricher,
@@ -438,20 +460,72 @@ fn maybe_fire_webhook(
     }
 }
 
-/// Register a minimal Ctrl-C handler that calls `f` once. Idempotent on
-/// re-entry so tests that call `run` multiple times don't panic.
-#[cfg(feature = "watcher")]
-fn ctrlc_once<F: FnOnce() + Send + 'static>(f: F) {
+/// Install SIGINT / SIGTERM / SIGHUP handlers that flip `shutdown`.
+/// Idempotent on re-entry so tests that call `run` multiple times
+/// don't double-register.
+///
+/// We run them off a dedicated current-thread tokio runtime because
+/// the TUI is synchronous and we don't want signal delivery to
+/// contend with its main thread. The in-tree `watcher` previously
+/// handled Ctrl+C only, but the TUI needs:
+///   - signals delivered BEFORE raw mode is active (startup phase),
+///   - SIGTERM/SIGHUP (`kill $pid`), which crossterm's key handler
+///     never sees because it only reads from the TTY.
+fn install_signal_handlers(shutdown: Arc<AtomicBool>) {
     use std::sync::Once;
     static ONCE: Once = Once::new();
     ONCE.call_once(move || {
-        let mut slot = Some(f);
-        tokio::spawn(async move {
-            if tokio::signal::ctrl_c().await.is_ok() {
-                if let Some(cb) = slot.take() {
-                    cb();
-                }
-            }
-        });
+        std::thread::Builder::new()
+            .name("logfold-signals".to_string())
+            .spawn(move || {
+                let rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(r) => r,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "signal runtime failed to start");
+                        return;
+                    }
+                };
+                rt.block_on(async move {
+                    #[cfg(unix)]
+                    {
+                        use tokio::signal::unix::{signal, SignalKind};
+                        let mut sigint = match signal(SignalKind::interrupt()) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                tracing::warn!(error = %e, "SIGINT handler failed");
+                                return;
+                            }
+                        };
+                        let mut sigterm = match signal(SignalKind::terminate()) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                tracing::warn!(error = %e, "SIGTERM handler failed");
+                                return;
+                            }
+                        };
+                        let mut sighup = match signal(SignalKind::hangup()) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                tracing::warn!(error = %e, "SIGHUP handler failed");
+                                return;
+                            }
+                        };
+                        tokio::select! {
+                            _ = sigint.recv() => {}
+                            _ = sigterm.recv() => {}
+                            _ = sighup.recv() => {}
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        let _ = tokio::signal::ctrl_c().await;
+                    }
+                    shutdown.store(true, Ordering::Relaxed);
+                });
+            })
+            .expect("spawning signal thread");
     });
 }

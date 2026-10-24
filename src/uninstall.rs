@@ -12,15 +12,19 @@
 //! - Learn-mode output dir: `./learned`.
 //! - State snapshot: default `/var/lib/logfold/state.bin` plus a
 //!   user-supplied path via `--state`.
+//! - The systemd service when it's detected AND we're running as
+//!   root (opt out with `--no-service`). Pre-v0.14 this was the
+//!   `--with-service` combo flag; now it happens automatically so
+//!   `logfold --uninstall` on a service host doesn't quietly leave
+//!   the daemon running.
+//!
+//! When the service is detected but we're not root, we bail with
+//! the exact `sudo logfold --uninstall` command to re-run instead
+//! of silently skipping it.
 //!
 //! What this does NOT handle (prints instructions instead):
-//! - The dedicated service user (`sudo userdel logfold`).
-//! - The systemd unit file (`sudo rm /etc/systemd/system/logfold.service`).
-//! - ACLs granted via `setfacl`.
-//!
-//! Those three require sudo and touch state outside the user's
-//! control, so we show the exact commands and let the operator
-//! run them. Keeps the uninstall non-magical.
+//! - ACLs on log files other than the standard set `install`
+//!   knew about (we can't track them).
 
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -34,6 +38,14 @@ pub struct UninstallOptions {
     pub yes: bool,
     /// Optional extra state path (`--state <FILE>` from the CLI).
     pub state: Option<PathBuf>,
+    /// Skip the systemd service tear-down even when a unit is
+    /// detected. The default is to also stop + disable + remove it,
+    /// since leaving a daemon running after `--uninstall` is a
+    /// footgun. Set via `--no-service` from the CLI.
+    pub no_service: bool,
+    /// Service user name to tear down with the service. Comes from
+    /// `--service-user` and defaults to `"logfold"` upstream.
+    pub service_user: String,
 }
 
 /// Run the uninstall flow. Returns `Ok(())` on success or if the
@@ -43,22 +55,57 @@ pub fn run(opts: UninstallOptions) -> Result<()> {
     let self_path = std::env::current_exe().context("resolving the running binary's path")?;
     let targets = collect_targets(&self_path, opts.state.as_deref());
 
+    let service_detected = service_is_installed();
+    let user = if opts.service_user.is_empty() {
+        "logfold".to_string()
+    } else {
+        opts.service_user.clone()
+    };
+    let tear_down_service = service_detected && !opts.no_service;
+
     println!("logfold --uninstall will remove:");
     for t in &targets {
         println!("  {} {}", if t.exists { "x" } else { "-" }, t.describe());
     }
-    println!();
-    println!("Not touched (requires sudo; see commands below if you need them):");
-    println!("  - dedicated service user:  sudo userdel -r logfold");
-    println!(
-        "  - systemd unit file:       sudo rm -f /etc/systemd/system/logfold.service && sudo systemctl daemon-reload"
-    );
-    println!("  - log-file ACLs:           sudo setfacl -x u:logfold /var/log/<file>");
+    if tear_down_service {
+        println!();
+        println!("Detected systemd service — will also:");
+        println!("  - systemctl stop logfold.service");
+        println!("  - systemctl disable logfold.service");
+        println!("  - rm /etc/systemd/system/logfold.service && daemon-reload");
+        println!("  - setfacl -x u:{user} /var/log/<common log files>");
+        println!("  - userdel -r {user}");
+        if !is_root_process() {
+            println!();
+            println!(
+                "The service needs root. Re-run as:  sudo logfold --uninstall"
+            );
+            println!(
+                "(or pass --no-service to leave the service in place and only remove user-level files)"
+            );
+            color_eyre::eyre::bail!("service tear-down needs root; aborting without changes");
+        }
+    } else if service_detected && opts.no_service {
+        println!();
+        println!("Detected systemd service — leaving in place (--no-service).");
+    }
     println!();
 
     if !opts.yes && !confirm("Proceed? [y/N] ")? {
         println!("Aborted. Nothing removed.");
         return Ok(());
+    }
+
+    let mut service_failed = false;
+    if tear_down_service {
+        match uninstall_service(&user) {
+            Ok(()) => println!("service removed."),
+            Err(e) => {
+                println!("service tear-down failed: {e:#}");
+                service_failed = true;
+            }
+        }
+        println!();
     }
 
     let mut removed = 0usize;
@@ -81,9 +128,39 @@ pub fn run(opts: UninstallOptions) -> Result<()> {
 
     println!();
     println!("Done. {removed} removed, {failed} failed.");
-    if failed > 0 {
+    if failed > 0 || service_failed {
         std::process::exit(1);
     }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn service_is_installed() -> bool {
+    crate::service::is_installed()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn service_is_installed() -> bool {
+    false
+}
+
+#[cfg(target_os = "linux")]
+fn is_root_process() -> bool {
+    crate::service::is_root()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn is_root_process() -> bool {
+    false
+}
+
+#[cfg(target_os = "linux")]
+fn uninstall_service(user: &str) -> Result<()> {
+    crate::service::uninstall(user)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn uninstall_service(_user: &str) -> Result<()> {
     Ok(())
 }
 

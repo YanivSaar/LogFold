@@ -1,67 +1,114 @@
 //! Help overlay — rendered when the user presses `?`.
+//!
+//! Grouped by section, scrollable, dynamically sized. Only lists keys
+//! that are actually wired up in `App::handle_key`.
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState};
 
 use crate::tui::theme;
 
+/// A help entry: a (section_header, "") marks a new group; a
+/// (key, description) is a binding line. `""` for both is a spacer.
 const HELP_LINES: &[(&str, &str)] = &[
-    (
-        "1 2 3 4",
-        "Switch to Overview / Detail / Sources / Timeline",
-    ),
-    ("Tab", "Next view (or next Detail sub-tab if in Detail)"),
-    ("Up Down / j k", "Move selection"),
-    ("Enter / Right", "Open Detail view for the selected pattern"),
+    ("~Navigation", ""),
+    ("1..4", "Overview / Detail / Sources / Timeline"),
+    ("Tab", "Next view (or next Detail sub-tab)"),
     ("Esc", "Back to Overview from Detail; quit elsewhere"),
     ("", ""),
-    (
-        "v / s / r",
-        "Detail sub-tabs: Variables / Score / Raw Lines",
-    ),
+    ("~Overview", ""),
+    ("↑ ↓ / j k", "Move selection"),
+    ("g / G", "Jump to top / bottom"),
+    ("n / N", "Next / previous anomaly"),
+    ("Enter / →", "Open Detail for the selected pattern"),
     ("", ""),
-    ("f or /", "Filter pattern list by substring"),
+    ("~Detail", ""),
+    ("v / s / r", "Variables / Score / Raw-Lines sub-tab"),
+    ("", ""),
+    ("~Filter", ""),
+    ("/  or  f", "Start filter (search skeleton + bundle)"),
     ("Backspace", "Edit the filter"),
-    ("Esc (in filter)", "Clear the filter"),
-    ("Enter (in filter)", "Keep the filter, exit edit mode"),
+    ("Enter", "Keep the filter, exit edit mode"),
+    ("Esc (in filter)", "Clear and exit"),
     ("", ""),
-    ("w", "Change time window (v0.5)"),
-    ("c", "Copy selected to clipboard (v0.6)"),
-    ("e", "Export current view (v0.11)"),
-    ("p", "Pause / resume ingest (v0.5)"),
-    ("q", "Quit"),
+    ("~Global", ""),
+    ("m", "Toggle mouse capture"),
+    ("q / Ctrl+C", "Quit"),
     ("?", "Toggle this help overlay"),
 ];
 
-pub fn render(frame: &mut Frame<'_>, area: Rect) {
-    // Centred overlay sized to content.
-    let w = 56u16;
-    let h = HELP_LINES.len() as u16 + 4;
+pub struct HelpState {
+    pub scroll: usize,
+}
+
+impl Default for HelpState {
+    fn default() -> Self {
+        HelpState { scroll: 0 }
+    }
+}
+
+impl HelpState {
+    pub fn scroll_up(&mut self) {
+        self.scroll = self.scroll.saturating_sub(1);
+    }
+
+    pub fn scroll_down(&mut self) {
+        if self.scroll + 1 < HELP_LINES.len() {
+            self.scroll += 1;
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.scroll = 0;
+    }
+}
+
+pub fn render(frame: &mut Frame<'_>, area: Rect, state: &HelpState) {
+    // Dynamic size: capped at 72 cols so wide terminals don't stretch
+    // the overlay, but shrinks to the screen on narrow ones.
+    let w = area.width.min(72).max(40);
+    let max_h = area.height.saturating_sub(2);
+    let content_rows = HELP_LINES.len() as u16 + 2; // + title and footer
+    let h = content_rows.min(max_h).max(5);
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
-    let overlay = Rect::new(x, y, w.min(area.width), h.min(area.height));
+    let overlay = Rect::new(x, y, w, h);
 
     frame.render_widget(Clear, overlay);
 
-    let mut text: Vec<Line<'_>> = HELP_LINES
+    let items: Vec<ListItem<'_>> = HELP_LINES
         .iter()
-        .map(|(key, desc)| {
-            Line::from(vec![
-                Span::styled(format!("  {key:<10} "), theme::muted_style()),
-                Span::styled(*desc, Style::default().fg(theme::FG)),
-            ])
+        .map(|(k, d)| {
+            if let Some(section) = k.strip_prefix('~') {
+                // Group heading.
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!(" {section} "), theme::header_style()),
+                ]))
+            } else if k.is_empty() && d.is_empty() {
+                ListItem::new(Line::from(""))
+            } else {
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("  {k:<16}"), theme::muted_style()),
+                    Span::styled(*d, Style::default().fg(theme::FG)),
+                ]))
+            }
         })
         .collect();
-    text.insert(0, Line::from(""));
 
-    let p = Paragraph::new(text)
+    let title = format!(" keybindings — logfold v{} ", env!("CARGO_PKG_VERSION"));
+    let footer = " ↑/↓ scroll · ? close ";
+
+    let list = List::new(items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" keybindings — press ? to close "),
+                .border_style(theme::accent_border_style())
+                .title(title)
+                .title_bottom(footer),
         )
-        .wrap(Wrap { trim: false })
         .style(theme::body_style());
 
-    frame.render_widget(p, overlay);
+    let mut ls = ListState::default();
+    ls.select(Some(state.scroll));
+    frame.render_stateful_widget(list, overlay, &mut ls);
 }
