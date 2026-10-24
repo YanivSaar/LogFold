@@ -1,0 +1,24 @@
+[meta]
+id          = "pam"
+name        = "PAM"
+category    = "auth"
+description = "Pluggable Authentication Modules — session open/close"
+
+[detect]
+path_hints = ["**/auth.log*", "**/secure*", "/var/log/auth*"]
+line_probes = [
+  "pam_unix\\(",
+  "session (opened|closed) for user",
+  "authentication failure;",
+]
+probe_threshold = 0.15
+
+[[pattern]]
+skeleton = "pam_unix({*}:session): session opened for user {USER}"
+label    = "session opened"
+severity = "info"
+
+[[pattern]]
+skeleton = "pam_unix({*}:auth): authentication failure; logname={*} uid={NUM} euid={NUM} tty={*} ruser={*} rhost={IP} user={USER}"
+label    = "PAM auth failure"
+severity = "medium"

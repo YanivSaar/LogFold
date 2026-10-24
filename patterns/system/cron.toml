@@ -1,0 +1,15 @@
+[meta]
+id          = "cron"
+name        = "cron"
+category    = "system"
+
+[detect]
+path_hints = ["/var/log/cron*", "**/cron.log*"]
+process_hints = ["cron", "crond", "anacron"]
+line_probes = ["CRON\\[\\d+\\]:", "\\([^)]+\\) CMD "]
+probe_threshold = 0.2
+
+[[pattern]]
+skeleton = "CRON[*]: ({USER}) CMD ({PATH})"
+label    = "cron command"
+severity = "info"

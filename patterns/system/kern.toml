@@ -1,0 +1,25 @@
+[meta]
+id          = "kern"
+name        = "Kernel"
+category    = "system"
+
+[detect]
+path_hints = ["/var/log/kern*", "**/kernel.log*"]
+process_hints = ["kernel"]
+line_probes = [
+  "kernel: ",
+  "\\[\\s*\\d+\\.\\d+\\]",     # bracketed uptime like [  12.345]
+  "Out of memory:",
+  "segfault at",
+]
+probe_threshold = 0.2
+
+[[pattern]]
+skeleton = "kernel: Out of memory: Kill process {NUM} ({*}) score {NUM}"
+label    = "OOM kill"
+severity = "high"
+
+[[pattern]]
+skeleton = "kernel: {*} segfault at {HASH} ip {HASH} sp {HASH} error {NUM}"
+label    = "segmentation fault"
+severity = "high"

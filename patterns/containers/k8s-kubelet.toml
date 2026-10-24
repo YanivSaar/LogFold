@@ -1,0 +1,14 @@
+[meta]
+id          = "k8s-kubelet"
+name        = "Kubernetes kubelet"
+category    = "containers"
+
+[detect]
+path_hints = ["journald:kubelet", "**/kubelet*.log*"]
+process_hints = ["kubelet"]
+line_probes = [
+  "^[IWE]\\d{4} \\d{2}:\\d{2}:\\d{2}\\.",     # klog header
+  "kubelet",
+  "pod_workers",
+]
+probe_threshold = 0.2

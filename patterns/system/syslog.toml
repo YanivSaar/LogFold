@@ -1,0 +1,15 @@
+[meta]
+id          = "syslog"
+name        = "Generic syslog"
+category    = "system"
+description = "Generic RFC 3164 syslog from /var/log/syslog or /var/log/messages"
+
+[detect]
+path_hints = [
+  "/var/log/syslog*",
+  "/var/log/messages*",
+]
+line_probes = [
+  "^\\w{3}\\s+\\d+\\s+\\d{2}:\\d{2}:\\d{2}\\s+\\S+\\s+\\S+\\[\\d+\\]:",
+]
+probe_threshold = 0.3

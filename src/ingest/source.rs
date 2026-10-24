@@ -1,0 +1,329 @@
+//! Source ingestion.
+//!
+//! One-shot mode (default) reads a source to EOF through the engine.
+//! `--follow` (file sources only) uses the `watcher` module to tail
+//! appended lines until the caller signals shutdown.
+
+use std::io::{self, BufRead, BufReader};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Instant;
+
+use color_eyre::eyre::{Context, Result};
+use compact_str::CompactString;
+
+use crate::detect::probe::{Detector, Verdict};
+use crate::detect::registry::{BundleRegistry, DetectConfig, MultilineMode};
+use crate::engine::registry::PatternRegistry;
+use crate::ingest::multiline::Assembler;
+use crate::parse::{skeleton, tokenizer, Token};
+
+/// Hard cap on a single logical line we accept from any source.
+/// A line longer than this is truncated at the boundary — this prevents
+/// a single pathological file (or a crafted binary blob) from exhausting
+/// memory via `read_until`.
+pub const MAX_LINE_BYTES: usize = 1 << 20; // 1 MiB
+
+/// A source descriptor passed in from the CLI.
+#[derive(Debug, Clone)]
+pub enum SourceKind {
+    Stdin,
+    File(PathBuf),
+}
+
+impl SourceKind {
+    pub fn label(&self) -> String {
+        match self {
+            SourceKind::Stdin => "stdin".to_string(),
+            SourceKind::File(p) => p.display().to_string(),
+        }
+    }
+
+    pub fn path(&self) -> Option<&Path> {
+        match self {
+            SourceKind::Stdin => None,
+            SourceKind::File(p) => Some(p.as_path()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceReport {
+    pub source: SourceKind,
+    pub lines: u64,
+    pub verdict: Verdict,
+}
+
+/// Drive one source to EOF.
+pub fn drive_source(
+    source: &SourceKind,
+    engine: &PatternRegistry,
+    bundles: &BundleRegistry,
+    detect_cfg: DetectConfig,
+    forced_bundle: Option<&str>,
+) -> Result<SourceReport> {
+    let reader: Box<dyn BufRead> = match source {
+        SourceKind::Stdin => Box::new(io::stdin().lock()),
+        SourceKind::File(p) => Box::new(BufReader::new(open_file_checked(p)?)),
+    };
+    drive(reader, source, engine, bundles, detect_cfg, forced_bundle)
+}
+
+/// Open a file source, warning about symlinks and non-regular files.
+/// We still open symlinks (common for logrotate'd /var/log/*.log) — this
+/// is advisory, not a block, because a locked-down ACL on the parent dir
+/// is the real defence.
+fn open_file_checked(p: &Path) -> Result<std::fs::File> {
+    match std::fs::symlink_metadata(p) {
+        Ok(md) => {
+            if md.file_type().is_symlink() {
+                let target = std::fs::read_link(p).ok();
+                tracing::warn!(
+                    path = %p.display(),
+                    ?target,
+                    "source is a symlink; following (be sure of its target when running as root)"
+                );
+            } else if !md.file_type().is_file() {
+                tracing::warn!(
+                    path = %p.display(),
+                    kind = ?md.file_type(),
+                    "source is not a regular file; proceeding anyway"
+                );
+            }
+        }
+        Err(e) => tracing::warn!(path = %p.display(), ?e, "symlink_metadata failed; proceeding"),
+    }
+    std::fs::File::open(p).with_context(|| format!("opening {}", p.display()))
+}
+
+/// Drive one source in follow (tail -f) mode. Blocks until `shutdown` returns true.
+#[cfg(feature = "watcher")]
+pub fn drive_source_follow(
+    source: &SourceKind,
+    engine: Arc<PatternRegistry>,
+    bundle_id: String,
+    shutdown: &dyn Fn() -> bool,
+) -> Result<()> {
+    let path = match source {
+        SourceKind::File(p) => p.clone(),
+        _ => color_eyre::eyre::bail!("follow mode only supports file sources"),
+    };
+
+    // Follow uses the bundle's declared multiline mode too.
+    //
+    // Note: we don't have a BundleRegistry here, so we re-derive the
+    // mode from the bundle id. Only ModSec needs special treatment today.
+    let mut assembler = if bundle_id == "modsec" {
+        Assembler::modsec_sections()
+    } else {
+        Assembler::new()
+    };
+    crate::ingest::watcher::tail(
+        &path,
+        |line| {
+            if let Some(ev) = assembler.push(line) {
+                fold_one(&ev, &engine, &bundle_id);
+            }
+        },
+        shutdown,
+    )?;
+    if let Some(final_ev) = assembler.drain() {
+        fold_one(&final_ev, &engine, &bundle_id);
+    }
+    Ok(())
+}
+
+fn drive(
+    reader: Box<dyn BufRead>,
+    source: &SourceKind,
+    engine: &PatternRegistry,
+    bundles: &BundleRegistry,
+    detect_cfg: DetectConfig,
+    forced_bundle: Option<&str>,
+) -> Result<SourceReport> {
+    let mut detector = Detector::attach(
+        bundles,
+        detect_cfg,
+        source.path().map(|p| p.to_path_buf()),
+        None,
+    );
+
+    if let Some(id) = forced_bundle {
+        let verdict = Verdict {
+            bundle_id: id.to_string(),
+            score: f32::INFINITY,
+            candidates: vec![],
+        };
+        let mut assembler = assembler_for(bundles, &verdict.bundle_id);
+        let lines = fold_to_eof(reader, engine, &verdict.bundle_id, &mut assembler)?;
+        return Ok(SourceReport {
+            source: source.clone(),
+            lines,
+            verdict,
+        });
+    }
+
+    if let Some(id) = detector.early_win() {
+        let verdict = Verdict {
+            bundle_id: id,
+            score: 1.5,
+            candidates: vec![],
+        };
+        let mut assembler = assembler_for(bundles, &verdict.bundle_id);
+        let lines = fold_to_eof(reader, engine, &verdict.bundle_id, &mut assembler)?;
+        return Ok(SourceReport {
+            source: source.clone(),
+            lines,
+            verdict,
+        });
+    }
+
+    let mut assembler;
+
+    // Line-probe path: buffer up to probe_lines, decide, replay, continue.
+    let mut reader = reader;
+    let mut buf = Vec::<u8>::with_capacity(1024);
+    loop {
+        buf.clear();
+        let line = match read_bounded_line(&mut reader, &mut buf)? {
+            Some(s) => s,
+            None => break, // EOF
+        };
+        if line.is_empty() {
+            continue;
+        }
+        if detector.observe(&line) {
+            break;
+        }
+    }
+
+    let verdict = detector.decide();
+    // Rebuild the assembler now that we know which bundle won — ModSec
+    // bundles need section-delimited grouping, not the heuristic default.
+    assembler = assembler_for(bundles, &verdict.bundle_id);
+    let pending = detector.drain_pending();
+    for line in &pending {
+        if let Some(ev) = assembler.push(line) {
+            fold_one(&ev, engine, &verdict.bundle_id);
+        }
+    }
+    let post = fold_to_eof(reader, engine, &verdict.bundle_id, &mut assembler)?;
+
+    Ok(SourceReport {
+        source: source.clone(),
+        lines: pending.len() as u64 + post,
+        verdict,
+    })
+}
+
+fn fold_to_eof<R: BufRead>(
+    mut reader: R,
+    engine: &PatternRegistry,
+    bundle_id: &str,
+    assembler: &mut Assembler,
+) -> Result<u64> {
+    let mut buf = Vec::<u8>::with_capacity(1024);
+    let mut lines = 0u64;
+    loop {
+        buf.clear();
+        let line = match read_bounded_line(&mut reader, &mut buf)? {
+            Some(s) => s,
+            None => break,
+        };
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(ev) = assembler.push(&line) {
+            fold_one(&ev, engine, bundle_id);
+        }
+        lines += 1;
+    }
+    if let Some(final_ev) = assembler.drain() {
+        fold_one(&final_ev, engine, bundle_id);
+    }
+    Ok(lines)
+}
+
+/// Read one line (up to a `\n`) into `buf`, returning the UTF-8-lossy
+/// text with trailing newline/CR stripped.
+///
+/// Guarantees:
+/// - At most [`MAX_LINE_BYTES`] bytes consumed. If the newline is
+///   farther out we return what we have and skip to the next `\n` on
+///   the next call, so a single pathological super-line can't exhaust
+///   memory.
+/// - Returns `None` only at true EOF, never on partial reads.
+/// - Invalid UTF-8 is replaced with U+FFFD; the parser never aborts
+///   because of a stray non-UTF-8 byte in an otherwise good log.
+fn read_bounded_line<R: BufRead>(
+    reader: &mut R,
+    buf: &mut Vec<u8>,
+) -> std::io::Result<Option<String>> {
+    buf.clear();
+    // We can't use `Read::take(&mut r, n)` here because it consumes the
+    // reader, so loop manually with a BufRead::fill_buf-style read.
+    let mut truncated = false;
+    while buf.len() < MAX_LINE_BYTES {
+        let remaining = MAX_LINE_BYTES - buf.len();
+        let before = buf.len();
+        let n = reader.read_until(b'\n', buf)?;
+        if n == 0 {
+            break;
+        }
+        if buf.last().copied() == Some(b'\n') {
+            break;
+        }
+        if buf.len() - before >= remaining {
+            // read_until gave us data without a newline, and we've hit the cap.
+            buf.truncate(MAX_LINE_BYTES);
+            truncated = true;
+            break;
+        }
+    }
+    if buf.is_empty() {
+        return Ok(None);
+    }
+    // If we hit the cap without a newline, discard the rest of this line.
+    if truncated {
+        let mut sink = Vec::<u8>::with_capacity(1024);
+        loop {
+            sink.clear();
+            let n = reader.read_until(b'\n', &mut sink)?;
+            if n == 0 || sink.last().copied() == Some(b'\n') {
+                break;
+            }
+            if sink.len() > MAX_LINE_BYTES * 4 {
+                // Give up — pathological input.
+                tracing::warn!("abandoning oversize line");
+                break;
+            }
+        }
+    }
+    // Trim trailing \n and \r.
+    while matches!(buf.last().copied(), Some(b'\n') | Some(b'\r')) {
+        buf.pop();
+    }
+    let s = String::from_utf8_lossy(buf).into_owned();
+    Ok(Some(s))
+}
+
+/// Pick an [`Assembler`] mode based on the chosen bundle's `multiline`
+/// field. Unknown bundles get the heuristic default.
+fn assembler_for(bundles: &BundleRegistry, bundle_id: &str) -> Assembler {
+    match bundles.by_id(bundle_id).map(|b| b.multiline) {
+        Some(MultilineMode::ModsecSections) => Assembler::modsec_sections(),
+        _ => Assembler::new(),
+    }
+}
+
+fn fold_one(line: &str, engine: &PatternRegistry, bundle_id: &str) {
+    let mut tokens: Vec<Token<'_>> = Vec::with_capacity(64);
+    tokenizer::classify(line, &mut tokens);
+    if tokens.is_empty() {
+        return;
+    }
+    let mut skel = CompactString::default();
+    let mut slots = Vec::with_capacity(8);
+    skeleton::build(&tokens, &mut skel, &mut slots);
+    engine.upsert(&skel, &slots, &tokens, bundle_id, Instant::now());
+}

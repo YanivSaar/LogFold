@@ -1,0 +1,24 @@
+[meta]
+id          = "apache-access"
+name        = "Apache access"
+category    = "web"
+description = "Apache httpd access log (CLF / combined)"
+
+[detect]
+path_hints = [
+  "/var/log/apache*/access*",
+  "/var/log/httpd/access*",
+  "**/apache*access*",
+]
+process_hints = ["apache", "httpd"]
+line_probes = [
+  "\" \\d{3} \\d+ \"",
+  "HTTP/1\\.\\d\"",
+  "\\[\\d{2}/\\w+/\\d{4}:",
+]
+probe_threshold = 0.3
+
+[[pattern]]
+skeleton = "{IP} - - [{DATE}] \"GET {PATH} HTTP/1.1\" {NUM} {NUM}"
+label    = "GET request"
+severity = "info"

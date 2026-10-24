@@ -1,0 +1,30 @@
+[meta]
+id          = "postfix"
+name        = "Postfix"
+category    = "mail"
+description = "Postfix MTA (smtpd / smtp / cleanup / qmgr)"
+
+[detect]
+path_hints = [
+  "/var/log/mail*",
+  "/var/log/maillog*",
+  "journald:postfix*",
+]
+process_hints = ["postfix", "smtpd", "qmgr", "cleanup"]
+line_probes = [
+  "postfix/(smtpd|smtp|cleanup|qmgr|pickup|bounce|local)\\[\\d+\\]:",
+  "message-id=<",
+  "status=(sent|bounced|deferred|rejected)",
+  "NOQUEUE: reject:",
+]
+probe_threshold = 0.15
+
+[[pattern]]
+skeleton = "postfix/smtp[*]: {HASH}: to=<{EMAIL}>, relay={*}, status=sent"
+label    = "mail delivered"
+severity = "info"
+
+[[pattern]]
+skeleton = "postfix/smtpd[*]: NOQUEUE: reject: RCPT from {*}: {NUM} {*}"
+label    = "mail rejected"
+severity = "medium"

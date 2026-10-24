@@ -1,0 +1,31 @@
+[meta]
+id          = "sudo"
+name        = "sudo"
+category    = "auth"
+description = "sudo command execution and policy denials"
+
+[detect]
+path_hints = [
+  "**/auth.log*",
+  "**/secure*",
+  "/var/log/auth*",
+  "journald:sudo",
+]
+process_hints = ["sudo"]
+line_probes = [
+  "sudo\\[\\d+\\]:",
+  "sudo:\\s+\\S+\\s*:",
+  "command not allowed",
+  "COMMAND=/",
+]
+probe_threshold = 0.1
+
+[[pattern]]
+skeleton = "sudo[*]: {USER} : TTY={*} ; PWD={PATH} ; USER={USER} ; COMMAND={PATH}"
+label    = "sudo command"
+severity = "medium"
+
+[[pattern]]
+skeleton = "sudo[*]: {USER} : command not allowed"
+label    = "sudo policy denial"
+severity = "high"

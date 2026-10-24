@@ -1,0 +1,24 @@
+[meta]
+id          = "iptables"
+name        = "iptables / netfilter"
+category    = "firewall"
+description = "kernel iptables log target output"
+
+[detect]
+path_hints = [
+  "/var/log/iptables*",
+  "/var/log/kern*",
+  "**/firewall*.log",
+]
+process_hints = ["kernel"]
+line_probes = [
+  "IN=.* OUT=.* MAC=",
+  "SRC=.* DST=",
+  "PROTO=(TCP|UDP|ICMP)",
+]
+probe_threshold = 0.2
+
+[[pattern]]
+skeleton = "[UFW BLOCK] IN={*} OUT={*} MAC={*} SRC={IP} DST={IP} LEN={NUM} TTL={NUM} ID={NUM} PROTO={*} SPT={NUM} DPT={NUM}"
+label    = "firewall block"
+severity = "medium"

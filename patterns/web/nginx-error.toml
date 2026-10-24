@@ -1,0 +1,24 @@
+[meta]
+id          = "nginx-error"
+name        = "Nginx error"
+category    = "web"
+description = "nginx error.log — upstream failures and request issues"
+
+[detect]
+path_hints = [
+  "/var/log/nginx/error*",
+  "**/nginx*error*",
+  "**/error.log*",
+]
+process_hints = ["nginx"]
+line_probes = [
+  "\\[(error|warn|crit|alert|emerg)\\]",
+  "upstream",
+  "client:",
+]
+probe_threshold = 0.2
+
+[[pattern]]
+skeleton = "[error] {NUM}#{NUM}: *{NUM} connect() failed {*} client: {IP}"
+label    = "upstream connect failure"
+severity = "medium"

@@ -1,0 +1,24 @@
+[meta]
+id          = "mysql-error"
+name        = "MySQL error log"
+category    = "database"
+description = "mysqld/mariadb error log"
+
+[detect]
+path_hints = [
+  "/var/log/mysql/error*",
+  "**/mysqld.err*",
+  "**/mariadb*error*",
+]
+process_hints = ["mysqld", "mariadbd"]
+line_probes = [
+  "\\[(ERROR|Warning|Note)\\]",
+  "InnoDB:",
+  "Got an error reading communication packets",
+]
+probe_threshold = 0.2
+
+[[pattern]]
+skeleton = "[ERROR] {*}"
+label    = "mysqld error"
+severity = "high"

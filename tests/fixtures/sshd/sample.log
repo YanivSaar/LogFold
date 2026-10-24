@@ -1,0 +1,23 @@
+Oct 23 09:14:01 host sshd[1024]: Accepted publickey for alice from 10.0.0.11 port 54231 ssh2
+Oct 23 09:14:02 host sshd[1025]: Accepted publickey for bob from 10.0.0.12 port 54232 ssh2
+Oct 23 09:14:03 host sshd[1026]: Accepted publickey for carol from 10.0.0.13 port 54233 ssh2
+Oct 23 09:14:10 host sshd[1030]: Failed password for alice from 203.0.113.5 port 60000 ssh2
+Oct 23 09:14:11 host sshd[1031]: Failed password for alice from 203.0.113.5 port 60001 ssh2
+Oct 23 09:14:12 host sshd[1032]: Failed password for alice from 203.0.113.5 port 60002 ssh2
+Oct 23 09:14:13 host sshd[1033]: Failed password for alice from 203.0.113.5 port 60003 ssh2
+Oct 23 09:14:14 host sshd[1034]: Failed password for alice from 203.0.113.5 port 60004 ssh2
+Oct 23 09:14:15 host sshd[1035]: Failed password for alice from 203.0.113.5 port 60005 ssh2
+Oct 23 09:14:16 host sshd[1036]: Failed password for alice from 203.0.113.5 port 60006 ssh2
+Oct 23 09:14:17 host sshd[1037]: Failed password for alice from 203.0.113.5 port 60007 ssh2
+Oct 23 09:14:18 host sshd[1038]: Failed password for alice from 203.0.113.5 port 60008 ssh2
+Oct 23 09:14:19 host sshd[1039]: Failed password for alice from 203.0.113.5 port 60009 ssh2
+Oct 23 09:14:20 host sshd[1040]: Failed password for alice from 203.0.113.5 port 60010 ssh2
+Oct 23 09:14:21 host sshd[1041]: Failed password for alice from 203.0.113.5 port 60011 ssh2
+Oct 23 09:14:22 host sshd[1042]: Failed password for alice from 203.0.113.5 port 60012 ssh2
+Oct 23 09:14:30 host sshd[1050]: Invalid user guest from 198.51.100.3 port 44400
+Oct 23 09:14:31 host sshd[1051]: Invalid user admin from 198.51.100.3 port 44401
+Oct 23 09:14:32 host sshd[1052]: Invalid user test from 198.51.100.3 port 44402
+Oct 23 09:14:45 host sshd[1070]: Accepted password for root from 203.0.113.5 port 60013 ssh2
+Oct 23 09:14:46 host sshd[1071]: Disconnected from authenticating user root 203.0.113.5 port 60013 [preauth]
+Oct 23 09:14:50 host sudo[1080]: alice : TTY=pts/0 ; PWD=/home/alice ; USER=root ; COMMAND=/tmp/evil.sh
+Oct 23 09:15:00 host sshd[1090]: Connection closed by 10.0.0.14 port 54234 [preauth]

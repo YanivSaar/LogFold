@@ -1,0 +1,5 @@
+/target
+/learned
+*.swp
+.DS_Store
+.claude/

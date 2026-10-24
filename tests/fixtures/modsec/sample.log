@@ -1,0 +1,45 @@
+--3f1a9b02-A--
+[01/Jan/2026:12:34:56 +0000] abc123xyz 203.0.113.42 50231 10.0.0.1 443
+--3f1a9b02-B--
+GET /?id=1%20OR%201=1 HTTP/1.1
+Host: www.example.com
+User-Agent: sqlmap/1.7
+Accept: */*
+
+--3f1a9b02-F--
+HTTP/1.1 403 Forbidden
+Content-Type: text/html
+Content-Length: 199
+
+--3f1a9b02-H--
+Message: Access denied with code 403 (phase 2). Matched "Operator Rx with parameter against variable ARGS:id" [file "/etc/modsecurity/crs/REQUEST-942-APPLICATION-ATTACK-SQLI.conf"] [line "45"] [id "942100"] [rev "2"] [msg "SQL Injection Attack Detected via libinjection"] [severity "CRITICAL"] [tag "application-multi"] [tag "attack-sqli"]
+Apache-Error: [file "mod_security2.c"] [line 101] [level 3] ModSecurity: Access denied with code 403 (phase 2).
+Action: Intercepted (phase 2)
+Stopwatch: 1704105296000000 1234 (- - -)
+Stopwatch2: 1704105296000000 1234; combined=345, p1=20, p2=301, p3=0, p4=0, p5=24, sr=0, sw=0, l=0, gc=0
+Response-Body-Transformed: Dechunked
+Producer: ModSecurity for Apache/2.9.6 (http://www.modsecurity.org/); OWASP_CRS/3.3.4.
+Server: Apache/2.4.57
+Engine-Mode: "ENABLED"
+
+--3f1a9b02-K--
+SecRule ARGS:id "@detectSQLi" "id:942100,phase:2,log,block,msg:'SQL Injection'"
+
+--3f1a9b02-Z--
+--c0ffee42-A--
+[01/Jan/2026:12:35:02 +0000] c0ffee42xx 198.51.100.9 44021 10.0.0.1 443
+--c0ffee42-B--
+POST /login HTTP/1.1
+Host: www.example.com
+User-Agent: Mozilla/5.0
+
+--c0ffee42-F--
+HTTP/1.1 200 OK
+
+--c0ffee42-H--
+Message: Warning. Pattern match "foo" at ARGS:bar [id "920100"] [msg "Benign scanner probe"] [severity "WARNING"]
+Stopwatch: 1704105302000000 920 (- - -)
+Producer: ModSecurity for Apache/2.9.6.
+Server: Apache/2.4.57
+
+--c0ffee42-Z--

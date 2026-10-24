@@ -1,0 +1,30 @@
+[meta]
+id          = "postgresql"
+name        = "PostgreSQL"
+category    = "database"
+description = "PostgreSQL server log"
+
+[detect]
+path_hints = [
+  "/var/log/postgresql/*",
+  "**/postgresql*.log",
+  "**/pgsql*.log",
+]
+process_hints = ["postgres", "postgresql"]
+line_probes = [
+  "LOG:  (connection|statement|duration|checkpoint)",
+  "ERROR:  ",
+  "FATAL:  ",
+  "WARNING:  ",
+]
+probe_threshold = 0.2
+
+[[pattern]]
+skeleton = "{DATE} FATAL: {*}"
+label    = "postgres fatal"
+severity = "high"
+
+[[pattern]]
+skeleton = "{DATE} ERROR: {*}"
+label    = "postgres error"
+severity = "medium"

@@ -1,0 +1,19 @@
+[meta]
+id          = "su"
+name        = "su"
+category    = "auth"
+
+[detect]
+path_hints = ["**/auth.log*", "**/secure*", "/var/log/auth*"]
+line_probes = ["su\\[\\d+\\]:", "FAILED SU"]
+probe_threshold = 0.1
+
+[[pattern]]
+skeleton = "su[*]: (to {USER}) {USER} on {*}"
+label    = "su success"
+severity = "medium"
+
+[[pattern]]
+skeleton = "su[*]: FAILED SU (to {USER}) {USER} on {*}"
+label    = "su failed"
+severity = "high"

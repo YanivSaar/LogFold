@@ -1,0 +1,14 @@
+[meta]
+id          = "generic/json"
+name        = "Generic JSON"
+category    = "generic"
+description = "Fallback for structured JSON logs with timestamp+level fields"
+
+[detect]
+line_probes = [
+  "^\\{",
+  "\"(level|severity|lvl)\"\\s*:",
+  "\"(ts|time|@timestamp|timestamp)\"\\s*:",
+  "\"(msg|message)\"\\s*:",
+]
+probe_threshold = 0.4

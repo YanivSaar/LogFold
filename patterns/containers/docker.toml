@@ -1,0 +1,14 @@
+[meta]
+id          = "docker"
+name        = "Docker daemon"
+category    = "containers"
+
+[detect]
+path_hints = ["/var/log/docker*", "journald:docker"]
+process_hints = ["dockerd", "docker"]
+line_probes = [
+  "level=(info|warning|error|debug)",
+  "msg=\"",
+  "containerd:",
+]
+probe_threshold = 0.2

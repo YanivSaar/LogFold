@@ -1,0 +1,29 @@
+[meta]
+id          = "nginx-access"
+name        = "Nginx access"
+category    = "web"
+description = "Combined Log Format access log emitted by nginx"
+
+[detect]
+path_hints = [
+  "/var/log/nginx/access*",
+  "**/nginx*access*",
+  "**/access.log*",
+]
+process_hints = ["nginx"]
+line_probes = [
+  "\" \\d{3} \\d+ \"",            # trailing `" 200 1234 "` of CLF
+  "HTTP/1\\.\\d\"",
+  "\\[\\d{2}/\\w+/\\d{4}:",
+]
+probe_threshold = 0.3
+
+[[pattern]]
+skeleton = "{IP} - - [{DATE}] \"GET {PATH} HTTP/1.1\" {NUM} {NUM} \"{*}\" \"{*}\""
+label    = "GET request"
+severity = "info"
+
+[[pattern]]
+skeleton = "{IP} - - [{DATE}] \"POST {PATH} HTTP/1.1\" {NUM} {NUM} \"{*}\" \"{*}\""
+label    = "POST request"
+severity = "info"

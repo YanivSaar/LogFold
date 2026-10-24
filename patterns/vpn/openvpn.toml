@@ -1,0 +1,15 @@
+[meta]
+id          = "openvpn"
+name        = "OpenVPN"
+category    = "vpn"
+
+[detect]
+path_hints = ["/var/log/openvpn*", "journald:openvpn*"]
+process_hints = ["openvpn"]
+line_probes = [
+  "OpenVPN",
+  "VERIFY (OK|ERROR):",
+  "TLS (handshake|Error)",
+  "(Peer|TLS): Initial packet from",
+]
+probe_threshold = 0.2

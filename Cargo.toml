@@ -1,0 +1,66 @@
+[package]
+name         = "logfold"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.75"
+description  = "Zero-config log pattern folder and anomaly detector"
+license      = "MIT OR Apache-2.0"
+repository   = "https://github.com/"
+readme       = "README.md"
+
+[dependencies]
+tokio             = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "fs", "sync", "signal", "time"] }
+ratatui           = { version = "0.27", optional = true }
+crossterm         = { version = "0.27", optional = true }
+clap              = { version = "4", features = ["derive"] }
+dashmap           = "6"
+crossbeam-channel = "0.5"
+parking_lot       = "0.12"
+compact_str       = "0.7"
+ahash             = "0.8"
+smallvec          = { version = "1", features = ["const_generics"] }
+indexmap          = "2"
+serde             = { version = "1", features = ["derive"] }
+serde_json        = "1"
+toml              = "0.8"
+globset           = "0.4"
+notify            = { version = "6", optional = true }
+regex             = { version = "1", features = ["perf"] }
+tracing           = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+color-eyre        = "0.6"
+include_dir       = "0.7"
+num_cpus          = "1"
+arboard           = { version = "3", optional = true }
+reqwest           = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+sd-journal        = { version = "0.1", optional = true }
+
+[features]
+default      = ["tui", "watcher"]
+tui          = ["dep:ratatui", "dep:crossterm"]
+watcher      = ["dep:notify"]
+journald     = ["dep:sd-journal"]
+clipboard    = ["dep:arboard"]
+webhook      = ["dep:reqwest"]
+compression  = []
+
+[dev-dependencies]
+insta      = { version = "1", features = ["yaml"] }
+proptest   = "1"
+criterion  = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name    = "hot_path"
+harness = false
+
+[profile.release]
+lto           = "thin"
+codegen-units = 1
+panic         = "abort"
+strip         = true
+
+[profile.bench]
+inherits = "release"
+strip    = false

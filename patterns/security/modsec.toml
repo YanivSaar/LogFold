@@ -1,0 +1,40 @@
+[meta]
+id          = "modsec"
+name        = "ModSecurity audit log"
+category    = "security"
+description = "ModSecurity WAF audit log (serial format, sections A..Z)"
+
+[detect]
+path_hints = [
+  "**/modsec_audit*",
+  "**/modsecurity*audit*",
+  "/var/log/modsec*",
+  "/var/log/apache*/modsec*",
+  "/var/log/nginx/modsec*",
+]
+process_hints = ["modsecurity", "modsec", "coraza"]
+line_probes = [
+  # Section boundary markers like `--abc123-A--` or `--abc123-Z--`.
+  "^-{2,}[A-Za-z0-9@._-]+-[A-KZ]-{2,}$",
+  # Access-denied trailer line.
+  "Access denied with code \\d{3}",
+  # Rule-id reference seen in H/K sections.
+  "\\[id \"\\d+\"\\]",
+  # Match-rule trailer tag.
+  "\\[msg \"",
+  "ModSecurity:",
+]
+probe_threshold = 0.1
+
+[parse]
+multiline = "modsec-sections"
+
+[[pattern]]
+skeleton = "ModSecurity: Access denied with code {NUM} (phase {NUM}). Matched \"Operator {*} against variable {*}\" [id \"{NUM}\"]"
+label    = "WAF deny"
+severity = "high"
+
+[[pattern]]
+skeleton = "ModSecurity: Warning. Pattern match {*} at {*} [id \"{NUM}\"]"
+label    = "WAF warning"
+severity = "medium"

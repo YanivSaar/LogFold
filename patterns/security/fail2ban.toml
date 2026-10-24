@@ -1,0 +1,20 @@
+[meta]
+id          = "fail2ban"
+name        = "Fail2ban"
+category    = "security"
+
+[detect]
+path_hints = ["/var/log/fail2ban*"]
+process_hints = ["fail2ban-server"]
+line_probes = [
+  "fail2ban\\.filter",
+  "fail2ban\\.actions",
+  "\\[(INFO|WARNING|NOTICE|ERROR)\\]",
+  "Ban \\d+\\.",
+]
+probe_threshold = 0.3
+
+[[pattern]]
+skeleton = "fail2ban.actions [*]: NOTICE [{*}] Ban {IP}"
+label    = "fail2ban ban"
+severity = "info"

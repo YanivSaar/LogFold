@@ -1,0 +1,14 @@
+[meta]
+id          = "apt"
+name        = "APT / dpkg"
+category    = "system"
+
+[detect]
+path_hints = ["/var/log/apt/*", "/var/log/dpkg*"]
+line_probes = [
+  "^Start-Date: ",
+  "^Commandline: ",
+  "^Install: ",
+  "status (installed|half-installed|unpacked)",
+]
+probe_threshold = 0.2

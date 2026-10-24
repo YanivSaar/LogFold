@@ -1,0 +1,13 @@
+[meta]
+id          = "auditd"
+name        = "Linux audit"
+category    = "system"
+
+[detect]
+path_hints = ["/var/log/audit/audit*"]
+line_probes = [
+  "^type=[A-Z_]+ msg=audit\\(",
+  "SYSCALL arch=",
+  "SELINUX_ERR",
+]
+probe_threshold = 0.3
