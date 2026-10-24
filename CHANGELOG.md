@@ -8,6 +8,35 @@ CLI surface and bundle schema.
 
 ## [Unreleased]
 
+### Added (v0.6 work)
+- Webhook sink behind the `webhook` cargo feature. Fires a
+  fire-and-forget POST on NEW / SPIKE / CROSS badges whose score
+  crosses `--webhook-min-score`.
+- `src/output/webhook.rs` with a `WebhookSink` that holds a
+  reqwest client plus a per-pattern cool-down map keyed by
+  pattern id; a repeat alert for the same pattern inside
+  `--webhook-dedup-secs` (default 300) is suppressed.
+- Three payload flavors:
+  - `generic` (default) - raw JSON `{event, badge, score,
+    bundle, pattern, count, peak_bucket}`.
+  - `slack` - `{"text": "<markdown>"}` sized for Slack Incoming
+    Webhooks.
+  - `pagerduty` - Events API v2 payload with
+    `routing_key`, `event_action`, `dedup_key`, and
+    `payload.custom_details`.
+- CLI flags `--webhook`, `--webhook-flavor`,
+  `--webhook-min-score`, `--webhook-dedup-secs`,
+  `--webhook-pd-routing-key` (also reads `LOGFOLD_PD_ROUTING_KEY`
+  from env).
+- PagerDuty flavor refuses to start without a routing key.
+- `WebhookOptions` struct lives at the `logfold` crate root so
+  callers compile against both feature configurations; the sink
+  only runs when the `webhook` feature is on.
+- Without the feature, `--webhook` errors out instead of
+  silently dropping alerts.
+- CI gains a webhook-feature test step and a build with every
+  feature on.
+
 ### Added (v0.5 work)
 - Transparent decompression on file sources. `.gz` and `.zst` are
   auto-detected by extension when the `compression` feature is on;

@@ -83,6 +83,27 @@ struct Cli {
     /// Verbose detection scoring details.
     #[arg(short = 'v', long)]
     verbose: bool,
+
+    /// POST anomaly events to this URL. Requires the `webhook` feature.
+    #[arg(long, value_name = "URL")]
+    webhook: Option<String>,
+
+    /// Payload flavor for `--webhook`: `generic` (default), `slack`, `pagerduty`.
+    #[arg(long, default_value = "generic", value_name = "FLAVOR")]
+    webhook_flavor: String,
+
+    /// Only POST when the computed score is at least N (default: 70).
+    #[arg(long, default_value_t = 70)]
+    webhook_min_score: u32,
+
+    /// Per-pattern cool-down (seconds) before a repeat POST.
+    #[arg(long, default_value_t = 300)]
+    webhook_dedup_secs: u64,
+
+    /// PagerDuty routing key (required with --webhook-flavor pagerduty).
+    /// Can also be set via `LOGFOLD_PD_ROUTING_KEY` env var; CLI wins.
+    #[arg(long, value_name = "KEY")]
+    webhook_pd_routing_key: Option<String>,
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -131,6 +152,19 @@ async fn main() -> Result<()> {
             out_dir: cli.learn_out,
             min_count: cli.learn_min,
             top: 100,
+        }),
+        webhook: cli.webhook.map(|url| {
+            let pd_key = cli
+                .webhook_pd_routing_key
+                .clone()
+                .or_else(|| std::env::var("LOGFOLD_PD_ROUTING_KEY").ok());
+            logfold::WebhookOptions {
+                url,
+                flavor: cli.webhook_flavor.clone(),
+                min_score: cli.webhook_min_score,
+                dedup_secs: cli.webhook_dedup_secs,
+                pd_routing_key: pd_key,
+            }
         }),
     };
 

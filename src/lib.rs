@@ -38,6 +38,10 @@ pub struct Config {
     pub patterns_dir: Option<PathBuf>,
     pub detect: DetectConfig,
     pub learn: Option<LearnOptions>,
+    /// Webhook sink configuration. Always present at the API level
+    /// so callers compile against both feature configurations; v0.6+
+    /// only wires it in when the `webhook` feature is on.
+    pub webhook: Option<WebhookOptions>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +49,16 @@ pub struct LearnOptions {
     pub out_dir: PathBuf,
     pub min_count: u64,
     pub top: usize,
+}
+
+/// Webhook sink options. v0.6.
+#[derive(Debug, Clone)]
+pub struct WebhookOptions {
+    pub url: String,
+    pub flavor: String,
+    pub min_score: u32,
+    pub dedup_secs: u64,
+    pub pd_routing_key: Option<String>,
 }
 
 impl Default for Config {
@@ -64,6 +78,7 @@ impl Default for Config {
             patterns_dir: None,
             detect: DetectConfig::default(),
             learn: None,
+            webhook: None,
         }
     }
 }
@@ -79,6 +94,10 @@ pub fn run(cfg: Config) -> Result<()> {
     }
     if (cfg.json || cfg.ndjson) && !cfg.no_tui {
         bail!("--json / --ndjson require --no-tui");
+    }
+    #[cfg(not(feature = "webhook"))]
+    if cfg.webhook.is_some() {
+        bail!("--webhook requires logfold to be built with --features webhook");
     }
 
     let bundles = Arc::new(BundleRegistry::load(cfg.patterns_dir.as_deref())?);
@@ -225,6 +244,8 @@ fn run_with_tui(
 
 fn render_text(cfg: &Config, engine: &PatternRegistry, reports: &[SourceReport]) -> Result<()> {
     let snaps = engine.snapshot();
+    #[cfg(feature = "webhook")]
+    maybe_fire_webhook(cfg, &snaps);
     let mut out = std::io::stdout().lock();
 
     if cfg.json || cfg.ndjson {
@@ -284,6 +305,41 @@ fn maybe_learn(cfg: &Config, engine: &PatternRegistry) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Resolve webhook config, build the sink, and run through every
+/// snapshot once. Short-circuits silently when no webhook is set.
+#[cfg(feature = "webhook")]
+fn maybe_fire_webhook(cfg: &Config, snaps: &[crate::engine::pattern::PatternSnapshot]) {
+    let Some(opts) = cfg.webhook.as_ref() else {
+        return;
+    };
+    let flavor = match output::webhook::Flavor::parse(&opts.flavor) {
+        Some(f) => f,
+        None => {
+            tracing::warn!(flavor = %opts.flavor, "unknown webhook flavor; skipping");
+            return;
+        }
+    };
+    let sink = match output::webhook::WebhookSink::new(output::webhook::Config {
+        url: opts.url.clone(),
+        flavor,
+        min_score: opts.min_score,
+        dedup: std::time::Duration::from_secs(opts.dedup_secs),
+        pagerduty_routing_key: opts.pd_routing_key.clone(),
+    }) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(error = %e, "webhook disabled");
+            return;
+        }
+    };
+    let peers = engine::scorer::build_peer_vars(snaps);
+    for snap in snaps {
+        let score = engine::scorer::compute_score(snap, &peers);
+        let badge = engine::scorer::classify_badge(snap, score, cfg.min_fold);
+        sink.try_notify(snap, score, badge);
+    }
 }
 
 /// Register a minimal Ctrl-C handler that calls `f` once. Idempotent on
