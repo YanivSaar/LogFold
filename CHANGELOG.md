@@ -11,6 +11,39 @@ CLI surface and bundle schema.
 (nothing yet)
 
 
+## [0.12.1] - 2026-10-24
+
+Install UX cleanup.
+
+### Added
+- `logfold --uninstall` built-in uninstaller. Prints the exact
+  dry-run plan (binary + user patterns dir + system patterns dir
+  + state dir + learn-mode output), prompts for confirmation,
+  removes what the user approves. `--yes` skips the prompt for
+  scripts. Sudo-only operations (service user, systemd unit,
+  ACLs) are printed as commands rather than attempted.
+
+### Removed
+- `install.sh` and the `curl ... | bash` one-liner. The release
+  workflow no longer uploads `install.sh` as a release asset.
+- README "Package managers" matrix. The planned-but-not-shipped
+  distro packages were misleading inventory; the right path is
+  the release tarball or `cargo install`.
+- Duplicate "Running as a service" section lower in the README.
+  Service setup now lives in a single section alongside install.
+
+### Changed
+- README install section rewritten with two paths: release
+  tarball (step-by-step, with checksum verification) and
+  source build (clone + `cargo build --release`).
+- README uninstall section points at `logfold --uninstall`
+  instead of the per-platform shell list.
+- CLI reference block in the README now covers every v0.1-v0.12
+  flag the binary ships, including `--iocs`, `--geoip`,
+  `--state`, `--webhook*`, `--prom-listen`, `--lint`,
+  `--uninstall`.
+
+
 ## [0.12.0] - 2026-10-24
 
 Fifth scheduled release in the "release every 3 versions" cadence.
@@ -409,7 +442,8 @@ Carried forward as audit items for v0.12:
 - No chroot or seccomp sandbox for root deployments.
 
 
-[Unreleased]: https://github.com/YanivSaar/LogFold/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/YanivSaar/LogFold/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/YanivSaar/LogFold/releases/tag/v0.12.1
 [0.12.0]: https://github.com/YanivSaar/LogFold/releases/tag/v0.12.0
 [0.10.0]: https://github.com/YanivSaar/LogFold/releases/tag/v0.10.0
 [0.7.0]: https://github.com/YanivSaar/LogFold/releases/tag/v0.7.0

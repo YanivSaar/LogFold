@@ -14,6 +14,7 @@ pub mod rules;
 pub mod state;
 pub mod tui;
 pub mod types;
+pub mod uninstall;
 
 use std::path::PathBuf;
 #[cfg(any(feature = "tui", feature = "watcher"))]

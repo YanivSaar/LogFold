@@ -132,6 +132,18 @@ struct Cli {
     /// Returns exit code 0 if every bundle parses and compiles.
     #[arg(long, conflicts_with_all = ["follow", "learn", "json", "ndjson"])]
     lint: bool,
+
+    /// Remove the running binary plus user config / state. Prints
+    /// a dry-run plan and prompts for confirmation; pair with
+    /// `--yes` to skip the prompt. Operations that need sudo
+    /// (service user, systemd unit, ACLs) are printed as commands
+    /// for you to run.
+    #[arg(long, conflicts_with_all = ["follow", "learn", "lint"])]
+    uninstall: bool,
+
+    /// Skip the interactive confirmation prompt for `--uninstall`.
+    #[arg(long, requires = "uninstall")]
+    yes: bool,
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -149,6 +161,13 @@ async fn main() -> Result<()> {
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
         .init();
+
+    if cli.uninstall {
+        return logfold::uninstall::run(logfold::uninstall::UninstallOptions {
+            yes: cli.yes,
+            state: cli.state.clone(),
+        });
+    }
 
     if cli.lint {
         return run_lint(&cli.sources);

@@ -158,9 +158,6 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
 
-      - name: Stage install.sh as a release asset
-        run: cp install.sh dist/install.sh
-
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
@@ -169,7 +166,6 @@ jobs:
             dist/*.tar.gz
             dist/*.sha256
             dist/SHA256SUMS
-            dist/install.sh
           generate_release_notes: true
           draft: false
           prerelease: ${{ steps.tag.outputs.prerelease == 'true' }}

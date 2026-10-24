@@ -75,236 +75,155 @@ logfold /var/log/auth.log --learn               # export learned bundles
 
 ## Installation
 
-### From source (works on any Linux, macOS, or BSD)
+Two supported paths: download a signed-checksum release tarball
+and drop the binary in place, or build from source. Nothing else
+is officially packaged yet.
 
-Requires Rust 1.75 or newer. If you don't have it:
+
+### From a release (recommended)
+
+Static Linux binaries and a macOS Apple Silicon binary are
+published on the [releases page](https://github.com/YanivSaar/LogFold/releases).
+Each release ships one tarball per target, a `.sha256` sidecar,
+and a combined `SHA256SUMS`.
+
+Pick the target that matches your host:
+
+| Platform                           | Target                        |
+|------------------------------------|-------------------------------|
+| Linux x86_64 (static, recommended) | `x86_64-unknown-linux-musl`   |
+| Linux x86_64 (dynamic, glibc)      | `x86_64-unknown-linux-gnu`    |
+| Linux ARM64 (static, recommended)  | `aarch64-unknown-linux-musl`  |
+| Linux ARM64 (dynamic, glibc)       | `aarch64-unknown-linux-gnu`   |
+| macOS Apple Silicon                | `aarch64-apple-darwin`        |
+| macOS Intel, FreeBSD, Windows      | build from source (below)     |
+
+`uname -s -m` tells you the OS and CPU.
+
+Install (replace `VERSION` with the tag from the releases page,
+and `TARGET` with the row from the table):
+
+```sh
+VERSION=v0.12.0
+TARGET=x86_64-unknown-linux-musl
+BASE="https://github.com/YanivSaar/LogFold/releases/download/${VERSION}"
+
+curl -LO "${BASE}/logfold-${VERSION}-${TARGET}.tar.gz"
+curl -LO "${BASE}/logfold-${VERSION}-${TARGET}.tar.gz.sha256"
+sha256sum -c "logfold-${VERSION}-${TARGET}.tar.gz.sha256"
+
+tar -xzf "logfold-${VERSION}-${TARGET}.tar.gz"
+sudo install -m 0755 "logfold-${VERSION}-${TARGET}/logfold" /usr/local/bin/
+
+logfold --version
+```
+
+macOS note: use `shasum -a 256 -c` in place of `sha256sum -c`.
+
+
+### From source
+
+Requires Rust 1.75 or newer. Install the toolchain with
+[rustup](https://rustup.rs/) if you don't have it:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-Then:
+Then build and install:
 
 ```sh
-# Install the latest release from crates.io (planned for v0.2)
-cargo install logfold
-
-# Or build from a clone
 git clone https://github.com/YanivSaar/LogFold.git
 cd LogFold
 cargo build --release
-./target/release/logfold --help
+sudo install -m 0755 target/release/logfold /usr/local/bin/
+logfold --version
 ```
 
-Default features build with the TUI and file watcher. To slim it
-down:
+Default features build the TUI and the file watcher. To tune the
+build:
 
 ```sh
-cargo build --release --no-default-features --features tui
-cargo build --release --no-default-features           # no TUI, no watcher
+# No TUI, no watcher - smallest footprint, no interactive UI.
+cargo build --release --no-default-features
+
+# Everything on - webhook, compression, journald, geoip, prometheus.
+cargo build --release --features "tui watcher webhook compression journald geoip prometheus"
 ```
 
 Optional features:
 
-| Feature       | What it adds                                   |
-|---------------|------------------------------------------------|
-| `tui`         | ratatui interface (default)                    |
-| `watcher`     | `notify`-based tail with rotation (default)    |
-| `journald`    | `--source journald:unit` on Linux (v0.5)       |
-| `compression` | `.gz` and `.zst` input (v0.5)                  |
-| `webhook`     | HTTP sink for alerts (v0.6)                    |
-| `clipboard`   | copy a pattern or line to the clipboard        |
-
-
-### Quick install (one-liner)
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/YanivSaar/LogFold/main/install.sh | bash
-```
-
-The script detects your OS and architecture, downloads the latest
-release tarball, verifies the SHA-256, and installs to
-`/usr/local/bin` (or `$HOME/.local/bin` if `/usr/local` isn't
-writable).
-
-Environment knobs (prepend to the `bash` call):
-
-| Variable           | Default           | Meaning                                 |
-|--------------------|-------------------|-----------------------------------------|
-| `LOGFOLD_VERSION`  | latest release    | Pin a specific tag, e.g. `v0.1.0`.      |
-| `LOGFOLD_PREFIX`   | autodetected      | Install prefix (`bin` suffix is added). |
-| `LOGFOLD_DRY_RUN`  | `0`               | `1` only downloads and verifies.        |
-
-Example pinned install into `$HOME/.local`:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/YanivSaar/LogFold/main/install.sh \
-  | LOGFOLD_VERSION=v0.1.0 LOGFOLD_PREFIX="$HOME/.local" bash
-```
-
-If you don't want to pipe to bash, download and read it first:
-
-```sh
-curl -fsSL -o install.sh https://raw.githubusercontent.com/YanivSaar/LogFold/main/install.sh
-less install.sh
-bash install.sh
-```
-
-
-### Pre-built binaries (manual)
-
-Static Linux and macOS binaries are published on the
-[releases page](https://github.com/YanivSaar/LogFold/releases).
-Each release includes a tarball per target and a matching
-`.sha256` checksum, plus a combined `SHA256SUMS` for the whole
-release.
-
-Pick the right target for your machine:
-
-| Platform                          | Target                           |
-|-----------------------------------|----------------------------------|
-| Linux x86_64 (recommended, static)| `x86_64-unknown-linux-musl`      |
-| Linux x86_64 (dynamic, glibc)     | `x86_64-unknown-linux-gnu`       |
-| Linux ARM64 (Pi 4+, Graviton)     | `aarch64-unknown-linux-musl`     |
-| Linux ARM64 (dynamic, glibc)      | `aarch64-unknown-linux-gnu`      |
-| macOS Apple Silicon               | `aarch64-apple-darwin`           |
-| macOS Intel                       | `cargo install logfold` (see below) |
-
-Quick check: `uname -s -m` tells you the OS and architecture.
-
-Install (Linux or macOS, musl Linux shown):
-
-```sh
-VERSION=v0.1.0
-TARGET=x86_64-unknown-linux-musl
-BASE="https://github.com/YanivSaar/LogFold/releases/download/${VERSION}"
-
-# Download the archive and its sha256 sidecar
-curl -LO "${BASE}/logfold-${VERSION}-${TARGET}.tar.gz"
-curl -LO "${BASE}/logfold-${VERSION}-${TARGET}.tar.gz.sha256"
-
-# Verify checksum before extracting
-sha256sum -c "logfold-${VERSION}-${TARGET}.tar.gz.sha256"
-
-# Extract and install into /usr/local/bin
-tar -xzf "logfold-${VERSION}-${TARGET}.tar.gz"
-sudo install -m 0755 "logfold-${VERSION}-${TARGET}/logfold" /usr/local/bin/
-
-# Confirm
-logfold --version
-```
-
-One-liner (verify + install, same version pin):
-
-```sh
-VERSION=v0.1.0 TARGET=x86_64-unknown-linux-musl \
-  bash -c '
-    set -euo pipefail
-    BASE="https://github.com/YanivSaar/LogFold/releases/download/${VERSION}"
-    tmp=$(mktemp -d) && cd "$tmp"
-    curl -sSL -O "${BASE}/logfold-${VERSION}-${TARGET}.tar.gz"
-    curl -sSL -O "${BASE}/logfold-${VERSION}-${TARGET}.tar.gz.sha256"
-    sha256sum -c "logfold-${VERSION}-${TARGET}.tar.gz.sha256"
-    tar -xzf "logfold-${VERSION}-${TARGET}.tar.gz"
-    sudo install -m 0755 "logfold-${VERSION}-${TARGET}/logfold" /usr/local/bin/
-    logfold --version
-  '
-```
-
-macOS note: use `shasum -a 256 -c` instead of `sha256sum -c`, and
-pick a `-apple-darwin` target.
-
-
-### Package managers
-
-Package availability per distro. Items marked "planned" land with
-v0.10 (ops integration + packaging). Pull requests to add a package
-sooner are welcome.
-
-| Distribution                | Command                                 | Status  |
-|-----------------------------|-----------------------------------------|---------|
-| Arch Linux (AUR)            | `yay -S logfold`                        | planned |
-| Debian / Ubuntu             | `apt install logfold` (via `.deb`)      | planned |
-| Fedora / RHEL / Rocky       | `dnf install logfold`                   | planned |
-| openSUSE                    | `zypper install logfold`                | planned |
-| Alpine Linux                | `apk add logfold`                       | planned |
-| Gentoo                      | `emerge app-admin/logfold`              | planned |
-| Void Linux                  | `xbps-install logfold`                  | planned |
-| NixOS / Nix                 | `nix profile install nixpkgs#logfold`   | planned |
-| Snap (universal)            | `snap install logfold`                  | planned |
-| Flatpak (universal)         | `flatpak install logfold`               | planned |
-| macOS (Homebrew)            | `brew install logfold`                  | planned |
-| macOS (MacPorts)            | `port install logfold`                  | planned |
-| FreeBSD                     | `pkg install logfold`                   | planned |
-| crates.io (any OS)          | `cargo install logfold`                 | v0.2    |
-| From source (any OS)        | `cargo build --release`                 | now     |
+| Feature       | What it adds                                              |
+|---------------|-----------------------------------------------------------|
+| `tui`         | ratatui interface (default)                               |
+| `watcher`     | `notify`-based tail with rotation detection (default)     |
+| `journald`    | `--source journald:<unit>` reads via `journalctl`         |
+| `compression` | transparent `.gz` and `.zst` on file sources              |
+| `webhook`     | `--webhook` POSTs anomaly events (generic/Slack/PagerDuty)|
+| `geoip`       | `--geoip <mmdb>` for ASN / country annotation on IPs      |
+| `prometheus`  | `--prom-listen HOST:PORT` serves `/metrics`               |
+| `clipboard`   | copy a pattern or line to the clipboard                   |
 
 
 ## Uninstall
 
-### Remove the binary
-
-Depends on how you installed it.
+logfold ships a built-in uninstaller:
 
 ```sh
-# Installed from a release tarball (into /usr/local/bin)
-sudo rm -f /usr/local/bin/logfold
-
-# Installed via `cargo install logfold`
-cargo uninstall logfold
-
-# Installed from a source clone (binary stayed in target/release)
-rm -f /path/to/LogFold/target/release/logfold
-
-# Installed from a distro package (replace with your distro)
-sudo apt remove logfold          # Debian / Ubuntu
-sudo dnf remove logfold          # Fedora / RHEL / Rocky
-sudo pacman -R logfold           # Arch Linux
-sudo zypper remove logfold       # openSUSE
-sudo apk del logfold             # Alpine Linux
-brew uninstall logfold           # macOS Homebrew
+sudo logfold --uninstall
 ```
 
-### Remove configuration, patterns, and state
-
-By default logfold reads no config file and writes nothing outside
-its CLI inputs. These paths exist only if you set them up yourself
-or will be used by features landing in future versions:
+It prints a dry-run plan listing exactly what it will remove -
+the running binary, user patterns dir, system patterns dir,
+learn-mode output, state snapshot - and prompts for confirmation.
+Pass `--yes` to skip the prompt in scripts:
 
 ```sh
-# User-level patterns (if you used --patterns-dir pointing here)
-rm -rf ~/.config/logfold
-
-# System-wide patterns
-sudo rm -rf /etc/logfold
-
-# Learn-mode output (default: ./learned under the invoking cwd)
-rm -rf ./learned
-
-# State snapshot (v0.10 and later, if --state was used)
-sudo rm -rf /var/lib/logfold
+sudo logfold --uninstall --yes
 ```
 
-### Remove the service user and systemd unit
+Operations that require sudo and sit outside logfold's own tree
+(the dedicated service user, the systemd unit file, log-file
+ACLs) are printed as the exact commands to run next, so nothing
+magical happens to the rest of the system.
 
-Only if you followed the hardened-service setup in `SECURITY.md`:
+If you installed via `cargo install`, `cargo uninstall logfold`
+also works and removes the Cargo-managed binary.
+
+
+## Running as a service
+
+logfold runs fine as a one-shot command, but it earns its keep as
+a long-lived service that tails live sources and feeds a webhook
+or `/metrics` endpoint.
+
+Short version:
 
 ```sh
-# Stop and disable the service
-sudo systemctl stop logfold.service    2>/dev/null || true
-sudo systemctl disable logfold.service 2>/dev/null || true
+# Dedicated user, no login shell, state dir.
+sudo useradd -r -s /usr/sbin/nologin -d /var/lib/logfold -M logfold
+sudo install -d -o logfold -g logfold -m 0750 /var/lib/logfold
 
-# Remove the unit file and reload systemd
-sudo rm -f /etc/systemd/system/logfold.service
+# Grant read access to the logs you want to fold.
+sudo setfacl -m u:logfold:r /var/log/auth.log
+
+# Drop in the hardened unit shipped with the repo.
+sudo cp contrib/systemd/logfold.service /etc/systemd/system/
 sudo systemctl daemon-reload
-
-# Drop the dedicated user and its ACL grants
-sudo setfacl -x u:logfold /var/log/auth.log            2>/dev/null || true
-sudo setfacl -x u:logfold /var/log/nginx/access.log    2>/dev/null || true
-sudo userdel -r logfold                                2>/dev/null || true
+sudo systemctl enable --now logfold.service
+sudo journalctl -u logfold -f
 ```
 
-After this nothing of logfold remains on the host.
+The unit at `contrib/systemd/logfold.service` enables every
+systemd sandbox knob `SECURITY.md` recommends (`NoNewPrivileges`,
+`ProtectSystem=strict`, `MemoryDenyWriteExecute`, empty
+`CapabilityBoundingSet`, 512 MiB `MemoryMax`). Edit the shipped
+`ExecStart` via `systemctl edit logfold.service` rather than
+patching the installed unit.
+
+Full walkthrough with webhook / state / IOC overrides lives in
+[`contrib/systemd/README.md`](contrib/systemd/README.md) and the
+threat model is in [`SECURITY.md`](SECURITY.md).
 
 
 ## Quick start
@@ -363,34 +282,50 @@ Review the file, edit the labels and severities, drop it into
 logfold [OPTIONS] [SOURCE...]
 
 Sources:
-  SOURCE                    One or more files, directories, or `-` for stdin.
-                            Globs are expanded by the shell.
+  SOURCE                        File path, directory, `-` for stdin, or
+                                `journald:<unit>` (requires journald feature).
+                                Globs are expanded by the shell.
 
 General:
-  -t, --top <N>             Show top N anomalies [default: 20]
-  -m, --min-fold <N>        Min count for FOLD badge [default: 3]
-  -T, --threshold <SCORE>   Min score to appear in ANOMALIES [default: 40]
-  -q, --quiet               Suppress banner
-  -v, --verbose             Debug-level tracing
-      --max-patterns <N>    Soft memory cap [default: 100_000]
+  -t, --top <N>                 Show top N anomalies [default: 20]
+  -m, --min-fold <N>            Min count for FOLD badge [default: 3]
+  -T, --threshold <SCORE>       Min score to appear in ANOMALIES [default: 40]
+  -q, --quiet                   Suppress banner
+  -v, --verbose                 Debug-level tracing
+      --max-patterns <N>        Soft memory cap [default: 100_000]
 
 Detection:
-  -b, --bundle <ID>         Force a specific bundle (skip detection)
-  -P, --patterns-dir <DIR>  Load additional *.toml bundles
-      --probe-lines <N>     Lines sampled before deciding [default: 64]
+  -b, --bundle <ID>             Force a specific bundle (skip detection)
+  -P, --patterns-dir <DIR>      Load additional *.toml bundles
+      --probe-lines <N>         Lines sampled before deciding [default: 64]
 
 Streaming:
-  -f, --follow              Tail -f each file source (requires watcher feature)
+  -f, --follow                  Tail -f each file source (watcher feature)
+      --state <FILE>            Persist registry on exit, reload on start
+
+Enrichment:
+      --iocs <FILE>             CSV of indicator,source,severity
+      --geoip <FILE>            MaxMind GeoIP mmdb (geoip feature)
 
 Output:
-      --no-tui              Plain-text output
-      --json                JSON array (requires --no-tui)
-      --ndjson              One JSON object per line (requires --no-tui)
+      --no-tui                  Plain-text output
+      --json                    JSON array (requires --no-tui)
+      --ndjson                  One JSON object per line (requires --no-tui)
+      --webhook <URL>           POST anomaly events (webhook feature)
+      --webhook-flavor <F>      generic | slack | pagerduty  [default: generic]
+      --webhook-min-score <N>   Threshold to fire  [default: 70]
+      --webhook-dedup-secs <N>  Per-pattern cool-down  [default: 300]
+      --prom-listen <ADDR>      Serve /metrics (prometheus feature)
 
 Learn:
-      --learn               Export learned bundles on exit
-      --learn-out <DIR>     Where to write learned bundles [default: ./learned]
-      --learn-min <N>       Min count to include [default: 5]
+      --learn                   Export learned bundles on exit
+      --learn-out <DIR>         Where to write them  [default: ./learned]
+      --learn-min <N>           Min count to include  [default: 5]
+
+Utility:
+      --lint <PATH>...          Validate TOML bundle files instead of folding
+      --uninstall               Remove the binary + user config / state
+      --yes                     Skip the confirmation prompt (with --uninstall)
 ```
 
 
@@ -450,23 +385,6 @@ apache), mail (postfix), database (postgres, mysql), firewall
 (iptables), containers (docker, k8s-kubelet), VPN (openvpn),
 security (fail2ban, modsec, auditd), and system logs. See
 `patterns/` for the full set.
-
-
-## Running as a service
-
-Running as root is convenient but unnecessary on most distros. The
-recommended pattern is a dedicated unprivileged user with ACLs for
-the specific logs it needs. Full guidance including a hardened
-systemd unit lives in [SECURITY.md](SECURITY.md).
-
-Short version:
-
-```sh
-useradd -r -s /usr/sbin/nologin logfold
-setfacl -m u:logfold:r /var/log/auth.log
-usermod -aG adm,systemd-journal logfold
-sudo -u logfold logfold /var/log/auth.log --no-tui --ndjson
-```
 
 
 ## Design notes
