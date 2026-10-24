@@ -37,6 +37,9 @@ jobs:
         run: cargo clippy --all-targets --features "tui watcher" --no-deps -- -D warnings
       - name: Tests
         run: cargo test --features "tui watcher" --locked
+      - name: crates.io publish dry-run
+        run: cargo publish --dry-run --features "tui watcher" --locked
+        continue-on-error: true
 
   build:
     name: Build ${{ matrix.target }}
