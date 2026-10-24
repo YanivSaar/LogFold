@@ -4,9 +4,12 @@ version      = "0.1.0"
 edition      = "2021"
 rust-version = "1.75"
 description  = "Zero-config log pattern folder and anomaly detector"
-license      = "MIT OR Apache-2.0"
-repository   = "https://github.com/"
+license      = "MIT"
+repository   = "https://github.com/YanivSaar/LogFold"
+homepage     = "https://github.com/YanivSaar/LogFold"
 readme       = "README.md"
+keywords     = ["logs", "observability", "anomaly-detection", "security", "tui"]
+categories   = ["command-line-utilities"]
 
 [dependencies]
 tokio             = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "fs", "sync", "signal", "time"] }
