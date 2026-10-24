@@ -6,6 +6,7 @@
 
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
+#[cfg(feature = "watcher")]
 use std::sync::Arc;
 use std::time::Instant;
 

@@ -11,6 +11,7 @@ pub mod tui;
 pub mod types;
 
 use std::path::PathBuf;
+#[cfg(any(feature = "tui", feature = "watcher"))]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -280,6 +281,7 @@ fn maybe_learn(cfg: &Config, engine: &PatternRegistry) -> Result<()> {
 
 /// Register a minimal Ctrl-C handler that calls `f` once. Idempotent on
 /// re-entry so tests that call `run` multiple times don't panic.
+#[cfg(feature = "watcher")]
 fn ctrlc_once<F: FnOnce() + Send + 'static>(f: F) {
     use std::sync::Once;
     static ONCE: Once = Once::new();
