@@ -13,7 +13,7 @@ categories   = ["command-line-utilities"]
 
 [dependencies]
 tokio             = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "fs", "net", "sync", "signal", "time"] }
-ratatui           = { version = "0.27", optional = true }
+ratatui           = { version = "0.30", optional = true }
 crossterm         = { version = "0.27", optional = true }
 clap              = { version = "4", features = ["derive"] }
 dashmap           = "6"
