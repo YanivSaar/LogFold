@@ -20,15 +20,44 @@ const SUSPICIOUS_PATHS: &[&str] = &["/tmp/", "/dev/shm/", "/var/tmp/", "/private
 /// *other* patterns' top-K; it's used by [`cross_correlation`]. The caller
 /// (`PatternRegistry::score_all`) builds this once per pass.
 pub fn compute_score(snap: &PatternSnapshot, peer_vars: &[(TokenType, &str)]) -> u32 {
-    let mut score = 0u32;
+    compute_score_components(snap, peer_vars).total()
+}
 
-    score += frequency(snap.count);
-    score += rate_spike(snap.peak_bucket, snap.mean_bucket);
-    score += cross_correlation(snap, peer_vars);
-    score += path_suspicion(snap);
-    score += snap.severity_hint.score_bonus();
+/// Per-component breakdown of the composite score, used by the Detail
+/// view's Score Breakdown subtab. Each field is the contribution
+/// before the final `.min(100)` clamp.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ScoreBreakdown {
+    pub frequency: u32,
+    pub rate_spike: u32,
+    pub cross_correlation: u32,
+    pub path_suspicion: u32,
+    pub severity: u32,
+}
 
-    score.min(100)
+impl ScoreBreakdown {
+    pub fn total(self) -> u32 {
+        (self.frequency
+            + self.rate_spike
+            + self.cross_correlation
+            + self.path_suspicion
+            + self.severity)
+            .min(100)
+    }
+}
+
+/// Same as [`compute_score`] but returns the per-component contributions.
+pub fn compute_score_components(
+    snap: &PatternSnapshot,
+    peer_vars: &[(TokenType, &str)],
+) -> ScoreBreakdown {
+    ScoreBreakdown {
+        frequency: frequency(snap.count),
+        rate_spike: rate_spike(snap.peak_bucket, snap.mean_bucket),
+        cross_correlation: cross_correlation(snap, peer_vars),
+        path_suspicion: path_suspicion(snap),
+        severity: snap.severity_hint.score_bonus(),
+    }
 }
 
 fn frequency(count: u64) -> u32 {
@@ -141,6 +170,8 @@ mod tests {
             last_seen: Instant::now(),
             peak_bucket: 0,
             mean_bucket: 0.0,
+            rate_buckets: [0; 24],
+            last_bucket_epoch: 0,
             vars: vec![],
         }
     }

@@ -19,6 +19,8 @@ fn snap(count: u64, severity: Severity, vars: Vec<VarStatsSnapshot>) -> PatternS
         last_seen: Instant::now(),
         peak_bucket: 0,
         mean_bucket: 0.0,
+        rate_buckets: [0; 24],
+        last_bucket_epoch: 0,
         vars,
     }
 }

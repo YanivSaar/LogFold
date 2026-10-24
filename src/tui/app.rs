@@ -57,6 +57,9 @@ impl View {
 
 struct App {
     view: View,
+    detail_tab: detail::Tab,
+    filter: String,
+    filter_mode: bool,
     overview: overview::OverviewState,
     snaps: Vec<PatternSnapshot>,
     reports: Vec<SourceReport>,
@@ -77,6 +80,9 @@ impl App {
         let overview = overview::OverviewState::build(&snaps, min_fold, anomaly_threshold);
         App {
             view: View::Overview,
+            detail_tab: detail::Tab::default(),
+            filter: String::new(),
+            filter_mode: false,
             overview,
             snaps,
             reports,
@@ -98,20 +104,55 @@ impl App {
             .first()
             .map(|r| format!("{} ({})", r.verdict.bundle_id, r.source.label()))
             .unwrap_or_else(|| "no sources".to_string());
+        let filter_part = if self.filter_mode {
+            format!("  |  filter: {}_", self.filter)
+        } else if !self.filter.is_empty() {
+            format!("  |  filter: {}", self.filter)
+        } else {
+            String::new()
+        };
         format!(
-            " {} lines  │  {} patterns  │  {}  │  threshold ≥ {}  │  [?]help [q]uit ",
+            " {} lines  |  {} patterns  |  {}  |  threshold >= {}{}  |  [?]help [f]ilter [q]uit ",
             fmt_count(total_lines),
             self.overview.rows.len(),
             bundle_summary,
-            self.anomaly_threshold
+            self.anomaly_threshold,
+            filter_part,
         )
     }
 
     fn handle_key(&mut self, code: KeyCode, mods: KeyModifiers) {
+        // Filter capture mode intercepts everything except Enter/Esc.
+        if self.filter_mode {
+            match code {
+                KeyCode::Esc => {
+                    self.filter.clear();
+                    self.filter_mode = false;
+                    self.rebuild_overview_filter();
+                }
+                KeyCode::Enter => {
+                    self.filter_mode = false;
+                }
+                KeyCode::Backspace => {
+                    self.filter.pop();
+                    self.rebuild_overview_filter();
+                }
+                KeyCode::Char(c) => {
+                    self.filter.push(c);
+                    self.rebuild_overview_filter();
+                }
+                _ => {}
+            }
+            return;
+        }
+
         if self.show_help && !matches!(code, KeyCode::Char('?') | KeyCode::Esc) {
             self.show_help = false;
         }
+
+        // Esc in Detail returns to Overview; everywhere else it quits.
         match code {
+            KeyCode::Esc if self.view == View::Detail => self.view = View::Overview,
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
             KeyCode::Char('c') if mods.contains(KeyModifiers::CONTROL) => self.quit = true,
             KeyCode::Char('?') => self.show_help = !self.show_help,
@@ -119,19 +160,57 @@ impl App {
             KeyCode::Char('2') => self.view = View::Detail,
             KeyCode::Char('3') => self.view = View::Sources,
             KeyCode::Char('4') => self.view = View::Timeline,
-            KeyCode::Tab => self.view = self.view.next(),
-            KeyCode::Up => self.overview.move_up(),
-            KeyCode::Down => self.overview.move_down(),
+            // Detail sub-tab shortcuts (available in any view; enters Detail).
+            KeyCode::Char('v') if self.view == View::Detail => {
+                self.detail_tab = detail::Tab::Variables
+            }
+            KeyCode::Char('s') if self.view == View::Detail => {
+                self.detail_tab = detail::Tab::ScoreBreakdown
+            }
+            KeyCode::Char('r') if self.view == View::Detail => {
+                self.detail_tab = detail::Tab::RawLines
+            }
+            // Filter: `f` or `/` opens filter capture mode.
+            KeyCode::Char('f') | KeyCode::Char('/') => {
+                self.filter_mode = true;
+                self.view = View::Overview;
+            }
+            KeyCode::Tab => {
+                if self.view == View::Detail {
+                    self.detail_tab = self.detail_tab.next();
+                } else {
+                    self.view = self.view.next();
+                }
+            }
+            KeyCode::Up | KeyCode::Char('k') => self.overview.move_up(),
+            KeyCode::Down | KeyCode::Char('j') => self.overview.move_down(),
             KeyCode::Enter | KeyCode::Right => self.view = View::Detail,
             _ => {}
         }
     }
 
+    fn rebuild_overview_filter(&mut self) {
+        self.overview = overview::OverviewState::build_filtered(
+            &self.snaps,
+            self.min_fold,
+            self.anomaly_threshold,
+            Some(&self.filter),
+        );
+    }
+
     fn refresh(&mut self, registry: &PatternRegistry) {
         let old_selected = self.overview.selected;
         self.snaps = registry.snapshot();
-        self.overview =
-            overview::OverviewState::build(&self.snaps, self.min_fold, self.anomaly_threshold);
+        self.overview = overview::OverviewState::build_filtered(
+            &self.snaps,
+            self.min_fold,
+            self.anomaly_threshold,
+            if self.filter.is_empty() {
+                None
+            } else {
+                Some(&self.filter)
+            },
+        );
         // Preserve selection if it still fits.
         if old_selected < self.overview.rows.len() {
             self.overview.selected = old_selected;
@@ -212,7 +291,16 @@ fn render(frame: &mut Frame<'_>, app: &App) {
 
     match app.view {
         View::Overview => overview::render(frame, chunks[1], &app.overview),
-        View::Detail => detail::render(frame, chunks[1], app.selected_snap()),
+        View::Detail => {
+            let peers = crate::engine::scorer::build_peer_vars(&app.snaps);
+            detail::render(
+                frame,
+                chunks[1],
+                app.selected_snap(),
+                &peers,
+                app.detail_tab,
+            );
+        }
         View::Sources => sources::render(frame, chunks[1], &app.reports),
         View::Timeline => timeline::render(frame, chunks[1], &app.snaps),
     }

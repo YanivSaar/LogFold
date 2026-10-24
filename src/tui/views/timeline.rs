@@ -1,8 +1,8 @@
 //! Timeline view: per-pattern rate sparkline.
 //!
-//! P3 minimal implementation — one row per top-N pattern, sparkline
-//! sourced from each pattern's rate_buckets. Interaction (hover /
-//! bucket inspection) lands with P4 live redraw.
+//! v0.3: wired to the real `rate_buckets` ring on each snapshot. The
+//! ring is already in chronological order (oldest-first) at snapshot
+//! time, so each `u32` here is one 5-minute slice of the last 2 hours.
 
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph, Sparkline};
@@ -23,7 +23,7 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, snaps: &[PatternSnapshot]) {
 
     let outer = Block::default()
         .borders(Borders::ALL)
-        .title(" timeline — top 8 by count ");
+        .title(" timeline - top 8 by count, last 2h in 5-min buckets ");
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
 
@@ -31,16 +31,19 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, snaps: &[PatternSnapshot]) {
     let chunks = Layout::vertical(constraints).split(inner);
 
     for (snap, &area) in top.iter().zip(chunks.iter()) {
-        let label = format!(" {:>7}  {} ", snap.count, snap.skeleton);
+        let peak = snap.peak_bucket;
+        let label = format!(
+            " {:>7}  peak {:>5}/5m  {} ",
+            snap.count, peak, snap.skeleton
+        );
         let p = Paragraph::new(label).style(theme::body_style());
-        let row = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+        let row = Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
             .split(area);
         frame.render_widget(p, row[0]);
 
-        // Placeholder bar — the pattern snapshot doesn't yet surface
-        // rate_buckets. Proper per-bucket values land with the live-redraw
-        // loop in P4.
-        let data = [snap.peak_bucket as u64; 24];
+        // The ring is already oldest-first in the snapshot; feed it
+        // straight to the sparkline widget.
+        let data: Vec<u64> = snap.rate_buckets.iter().map(|&b| b as u64).collect();
         let spark = Sparkline::default()
             .data(&data)
             .style(Style::default().fg(theme::score_color(snap.count.min(100) as u32)));

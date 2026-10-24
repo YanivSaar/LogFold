@@ -157,6 +157,17 @@ impl Pattern {
             })
             .collect();
 
+        // Snapshot the rate-bucket ring in chronological order. The
+        // raw ring is indexed `(epoch % RATE_BUCKETS)`, so to walk it
+        // oldest-to-newest we start one past the current epoch index.
+        let last_epoch = self.last_bucket_epoch.load(Ordering::Relaxed);
+        let current_idx = (last_epoch as usize) % RATE_BUCKETS;
+        let mut rate_buckets = [0u32; RATE_BUCKETS];
+        for (out_i, slot) in rate_buckets.iter_mut().enumerate() {
+            let src_i = (current_idx + 1 + out_i) % RATE_BUCKETS;
+            *slot = self.rate_buckets[src_i].load(Ordering::Relaxed);
+        }
+
         PatternSnapshot {
             id: self.id,
             skeleton: self.skeleton.clone(),
@@ -168,6 +179,8 @@ impl Pattern {
             last_seen: *self.last_seen.lock(),
             peak_bucket: self.peak_bucket(),
             mean_bucket: self.mean_bucket(),
+            rate_buckets,
+            last_bucket_epoch: last_epoch,
             vars,
         }
     }
@@ -364,6 +377,13 @@ pub struct PatternSnapshot {
     pub last_seen: Instant,
     pub peak_bucket: u32,
     pub mean_bucket: f32,
+    /// Rate-bucket ring in chronological order, oldest-first. 24
+    /// buckets of 5 minutes each = 2 hours of history. v0.3 wiring.
+    pub rate_buckets: [u32; RATE_BUCKETS],
+    /// Current epoch index (bucket count since first_seen). Lets the
+    /// Timeline view compute wall-clock labels per bucket if it wants
+    /// to.
+    pub last_bucket_epoch: u64,
     pub vars: Vec<VarStatsSnapshot>,
 }
 

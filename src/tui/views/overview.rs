@@ -23,9 +23,31 @@ pub struct ScoredRow {
 
 impl OverviewState {
     pub fn build(snaps: &[PatternSnapshot], min_fold: u64, anomaly_threshold: u32) -> Self {
+        Self::build_filtered(snaps, min_fold, anomaly_threshold, None)
+    }
+
+    /// Same as [`build`] but applies an optional substring filter on
+    /// the skeleton text. Case-insensitive. Keeps the anomaly /
+    /// pattern partition inside the filtered set.
+    pub fn build_filtered(
+        snaps: &[PatternSnapshot],
+        min_fold: u64,
+        anomaly_threshold: u32,
+        filter: Option<&str>,
+    ) -> Self {
         let peers = scorer::build_peer_vars(snaps);
+        let needle = filter.map(|s| s.to_ascii_lowercase());
+
         let mut scored: Vec<ScoredRow> = snaps
             .iter()
+            .filter(|snap| match &needle {
+                Some(f) if !f.is_empty() => {
+                    let skel = snap.skeleton.to_ascii_lowercase();
+                    let bundle = snap.bundle_id.to_ascii_lowercase();
+                    skel.contains(f.as_str()) || bundle.contains(f.as_str())
+                }
+                _ => true,
+            })
             .cloned()
             .map(|snap| {
                 let score = scorer::compute_score(&snap, &peers);

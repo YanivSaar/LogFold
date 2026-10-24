@@ -22,6 +22,9 @@ struct PatternOut<'a> {
     badge: &'static str,
     peak_bucket: u32,
     mean_bucket: f32,
+    /// 24 slots of 5-minute buckets covering the last 2 hours,
+    /// oldest-first.
+    rate_buckets: [u32; 24],
     first_seen_unix_ms: u128,
     last_seen_unix_ms: u128,
     vars: Vec<VarOut<'a>>,
@@ -88,6 +91,7 @@ pub fn render<W: Write>(
                 badge,
                 peak_bucket: s.peak_bucket,
                 mean_bucket: s.mean_bucket,
+                rate_buckets: s.rate_buckets,
                 first_seen_unix_ms: process_start.saturating_sub(first_delta),
                 last_seen_unix_ms: process_start.saturating_sub(last_delta),
                 vars: s

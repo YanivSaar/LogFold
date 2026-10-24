@@ -8,6 +8,28 @@ CLI surface and bundle schema.
 
 ## [Unreleased]
 
+### Added (v0.3 work)
+- Timeline view: now reads the real `rate_buckets` ring instead of
+  placeholder bars. 24 slots of 5-minute buckets covering the last
+  2 hours, oldest-first. Each row shows peak/5m alongside the
+  pattern skeleton.
+- `PatternSnapshot` carries `rate_buckets: [u32; 24]` and
+  `last_bucket_epoch: u64`. JSON output now exposes the ring.
+- Detail view gains three sub-tabs: Variables (existing),
+  Score Breakdown (new, shows per-component contribution from
+  frequency / rate_spike / cross_correlation / path_suspicion /
+  severity), Raw Lines (new, synthesises example lines by
+  plugging top-K values into the skeleton; real raw retention
+  lands with v0.6 webhooks).
+- `scorer::compute_score_components` returns the per-component
+  breakdown that the new Detail subtab reads.
+- Filter / search: `f` or `/` enters filter mode, Backspace edits,
+  Esc clears, Enter keeps. Live substring match on skeleton and
+  bundle_id, case-insensitive. Filter state persists through 500ms
+  refresh cycles.
+- Help overlay rewritten to document the new keybindings and
+  push stale P4/P6 placeholders to their real target versions.
+
 ### Added (v0.2 work)
 - `src/parse/formats/syslog.rs`: RFC 3164 and 5424 parser. Strips the
   envelope (`<pri>`, timestamp, hostname, `process[pid]:`) so the fold
