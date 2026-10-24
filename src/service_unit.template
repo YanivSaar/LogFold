@@ -1,0 +1,53 @@
+[Unit]
+Description=logfold - zero-config log pattern folder and anomaly detector
+Documentation=https://github.com/YanivSaar/LogFold
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={SERVICE_USER}
+Group={SERVICE_USER}
+
+ExecStart={BIN_PATH} {EXEC_ARGS}
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=logfold
+Restart=on-failure
+RestartSec=5s
+
+# Hardening per SECURITY.md. Strip ambient caps, forbid new privs,
+# isolate the filesystem.
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Writable state dir for --state snapshots; read-only /var/log and
+# /etc/logfold. Operators who need webhook / metrics should drop in
+# an override that adds RestrictAddressFamilies=AF_INET AF_INET6.
+ReadWritePaths=/var/lib/logfold
+ReadOnlyPaths=/var/log /etc/logfold
+
+MemoryMax=512M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

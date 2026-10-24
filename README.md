@@ -193,37 +193,68 @@ also works and removes the Cargo-managed binary.
 
 ## Running as a service
 
-logfold runs fine as a one-shot command, but it earns its keep as
-a long-lived service that tails live sources and feeds a webhook
-or `/metrics` endpoint.
-
-Short version:
+logfold has a built-in `--install-service` on Linux. One command
+creates the dedicated user, grants read ACLs on the logs you
+name, drops a hardened systemd unit in place, reloads systemd,
+and starts the daemon:
 
 ```sh
-# Dedicated user, no login shell, state dir.
-sudo useradd -r -s /usr/sbin/nologin -d /var/lib/logfold -M logfold
-sudo install -d -o logfold -g logfold -m 0750 /var/lib/logfold
+sudo logfold --install-service \
+    --service-logs /var/log/auth.log \
+    --service-logs /var/log/nginx/access.log \
+    --service-extra "--webhook https://hooks.example.com/logfold"
+```
 
-# Grant read access to the logs you want to fold.
-sudo setfacl -m u:logfold:r /var/log/auth.log
+What it does, in order:
 
-# Drop in the hardened unit shipped with the repo.
-sudo cp contrib/systemd/logfold.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now logfold.service
+1. `useradd -r -s /usr/sbin/nologin -d /var/lib/logfold -M logfold`
+   (idempotent; "exists" is treated as success).
+2. `install -d -o logfold -g logfold -m 0750 /var/lib/logfold` for
+   the state snapshot directory.
+3. `setfacl -m u:logfold:r <path>` on every `--service-logs` entry.
+4. Writes `/etc/systemd/system/logfold.service` from the embedded
+   template, substituting the current binary path, service user,
+   and ExecStart args (`--no-tui --ndjson --follow` + sources +
+   `--service-extra`).
+5. `systemctl daemon-reload`.
+6. `systemctl enable --now logfold.service`.
+
+The embedded unit template enables every systemd sandbox knob
+`SECURITY.md` recommends: `NoNewPrivileges`, `ProtectSystem=strict`,
+`MemoryDenyWriteExecute`, empty `CapabilityBoundingSet`, 512 MiB
+`MemoryMax`. If you need network for `--webhook` or
+`--prom-listen`, drop in `RestrictAddressFamilies=AF_UNIX
+AF_INET AF_INET6` via `systemctl edit logfold.service` after
+install.
+
+Watch it:
+
+```sh
 sudo journalctl -u logfold -f
 ```
 
-The unit at `contrib/systemd/logfold.service` enables every
-systemd sandbox knob `SECURITY.md` recommends (`NoNewPrivileges`,
-`ProtectSystem=strict`, `MemoryDenyWriteExecute`, empty
-`CapabilityBoundingSet`, 512 MiB `MemoryMax`). Edit the shipped
-`ExecStart` via `systemctl edit logfold.service` rather than
-patching the installed unit.
+### Flag reference for `--install-service`
 
-Full walkthrough with webhook / state / IOC overrides lives in
-[`contrib/systemd/README.md`](contrib/systemd/README.md) and the
-threat model is in [`SECURITY.md`](SECURITY.md).
+| Flag                        | Meaning                                                 |
+|-----------------------------|---------------------------------------------------------|
+| `--service-logs <PATH>`     | Log file to ACL for the service user. Repeatable.       |
+| `--service-user <NAME>`     | Service user name  [default: logfold]                   |
+| `--service-source <SRC>`    | Log source for the daemon. Repeatable. Accepts files or `journald:<unit>`. Falls back to `--service-logs` when omitted. |
+| `--service-extra <STRING>`  | Extra flags appended to ExecStart (webhook / state / iocs). |
+| `--yes`                     | Skip the confirmation prompt.                            |
+
+### Uninstalling the service
+
+```sh
+sudo logfold --uninstall --with-service
+```
+
+That stops and disables the unit, removes
+`/etc/systemd/system/logfold.service`, reloads systemd, drops the
+`logfold` user ACLs from the common `/var/log/*` locations, and
+`userdel -r`s the service user. The regular `--uninstall` pass
+then removes the binary and any config / state the operator
+confirms.
 
 
 ## Quick start

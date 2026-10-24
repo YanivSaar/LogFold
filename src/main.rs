@@ -141,9 +141,44 @@ struct Cli {
     #[arg(long, conflicts_with_all = ["follow", "learn", "lint"])]
     uninstall: bool,
 
-    /// Skip the interactive confirmation prompt for `--uninstall`.
-    #[arg(long, requires = "uninstall")]
+    /// Skip the interactive confirmation prompt for `--uninstall`
+    /// or `--install-service`.
+    #[arg(long)]
     yes: bool,
+
+    /// Install logfold as a hardened systemd service: creates the
+    /// service user, grants read ACLs on `--service-logs`, drops
+    /// in the unit file, reloads systemd, and enables + starts.
+    /// Linux only. Needs root.
+    #[arg(long, conflicts_with_all = ["follow", "learn", "lint", "uninstall"])]
+    install_service: bool,
+
+    /// Log files the service user should be granted read access
+    /// to via `setfacl -m u:<user>:r`. Repeatable.
+    #[arg(long, value_name = "PATH")]
+    service_logs: Vec<PathBuf>,
+
+    /// Dedicated service user name.
+    #[arg(long, value_name = "NAME", default_value = "logfold")]
+    service_user: String,
+
+    /// Log sources to pass to the daemon's logfold invocation.
+    /// Repeatable. Falls back to `--service-logs` when omitted.
+    /// Accepts `journald:<unit>` as well as file paths.
+    #[arg(long, value_name = "SOURCE")]
+    service_source: Vec<String>,
+
+    /// Extra flags (quoted) appended to the daemon's ExecStart,
+    /// after `--no-tui --ndjson --follow` and the sources. Use
+    /// this for `--webhook`, `--iocs`, `--state`, etc.
+    #[arg(long, value_name = "STRING", default_value = "")]
+    service_extra: String,
+
+    /// Also tear down the systemd service when running
+    /// `--uninstall`. Stops, disables, removes the unit, drops
+    /// ACLs, deletes the service user.
+    #[arg(long, requires = "uninstall")]
+    with_service: bool,
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -162,7 +197,14 @@ async fn main() -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
+    if cli.install_service {
+        return run_install_service(&cli);
+    }
+
     if cli.uninstall {
+        if cli.with_service {
+            run_uninstall_service(&cli.service_user)?;
+        }
         return logfold::uninstall::run(logfold::uninstall::UninstallOptions {
             yes: cli.yes,
             state: cli.state.clone(),
@@ -226,6 +268,55 @@ async fn main() -> Result<()> {
     };
 
     logfold::run(cfg)
+}
+
+/// Dispatch `--install-service` to the Linux-only installer module.
+/// Builds the daemon ExecStart from `--service-source` (or
+/// `--service-logs` when sources are omitted) plus `--service-extra`.
+#[cfg(target_os = "linux")]
+fn run_install_service(cli: &Cli) -> Result<()> {
+    let mut exec_args = vec![
+        "--no-tui".to_string(),
+        "--ndjson".to_string(),
+        "--follow".to_string(),
+    ];
+    let sources: Vec<String> = if !cli.service_source.is_empty() {
+        cli.service_source.clone()
+    } else {
+        cli.service_logs
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect()
+    };
+    exec_args.extend(sources);
+    if !cli.service_extra.is_empty() {
+        for part in cli.service_extra.split_whitespace() {
+            exec_args.push(part.to_string());
+        }
+    }
+
+    logfold::service::install(logfold::service::InstallOptions {
+        user: cli.service_user.clone(),
+        logs: cli.service_logs.clone(),
+        exec_args,
+        enable_now: true,
+        yes: cli.yes,
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn run_install_service(_cli: &Cli) -> Result<()> {
+    color_eyre::eyre::bail!("--install-service is Linux only (uses systemd)");
+}
+
+#[cfg(target_os = "linux")]
+fn run_uninstall_service(user: &str) -> Result<()> {
+    logfold::service::uninstall(user)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn run_uninstall_service(_user: &str) -> Result<()> {
+    Ok(())
 }
 
 /// Validate bundle TOML files. Prints one line per file plus a summary;

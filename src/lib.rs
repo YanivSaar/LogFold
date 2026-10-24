@@ -11,6 +11,8 @@ pub mod metrics;
 pub mod output;
 pub mod parse;
 pub mod rules;
+#[cfg(target_os = "linux")]
+pub mod service;
 pub mod state;
 pub mod tui;
 pub mod types;

@@ -11,6 +11,48 @@ CLI surface and bundle schema.
 (nothing yet)
 
 
+## [0.13.0] - 2026-10-24
+
+Built-in systemd service installer.
+
+### Added
+- `logfold --install-service` installs logfold as a hardened
+  systemd service in one command. Steps performed automatically:
+  creates a dedicated service user (`useradd -r`), creates the
+  state dir with correct ownership, grants read ACLs on each
+  `--service-logs` path via `setfacl -m u:<user>:r`, writes the
+  unit file to `/etc/systemd/system/logfold.service`, runs
+  `systemctl daemon-reload`, and enables + starts the unit.
+  Linux only. Requires root.
+- `--service-logs <PATH>` (repeatable) - log files to ACL at
+  install time. Paths that do not exist yet are skipped with a
+  note and must be ACL'd manually later.
+- `--service-user <NAME>` - service user name; default `logfold`.
+- `--service-source <SOURCE>` (repeatable) - sources for the
+  daemon's ExecStart. Accepts file paths or `journald:<unit>`.
+  Falls back to `--service-logs` when omitted.
+- `--service-extra <STRING>` - extra flags appended to ExecStart
+  after the sources (e.g. `--webhook`, `--state`, `--iocs`).
+- `--with-service` (requires `--uninstall`) - also tears down the
+  systemd service when uninstalling: stops and disables the unit,
+  removes the unit file, cleans up ACLs, deletes the service user.
+
+### Known gaps in this release
+- `--service-source journald:<unit>` with `--follow` will fail at
+  runtime; journald sources are not file-based. Use file sources
+  when installing as a service.
+- ACL cleanup on `--uninstall --with-service` covers only the six
+  common log paths (auth.log, secure, nginx, apache2). ACLs on
+  custom paths granted at install time are not removed
+  automatically.
+- `userdel -r` removes the service user's home dir
+  (`/var/lib/logfold`), which deletes any `--state` snapshot
+  saved there. Back up the state file before uninstalling if you
+  need it.
+- ExecStart arguments are space-joined without shell quoting.
+  Log paths containing spaces are not supported.
+
+
 ## [0.12.1] - 2026-10-24
 
 Install UX cleanup.
