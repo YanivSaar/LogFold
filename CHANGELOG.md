@@ -8,6 +8,56 @@ CLI surface and bundle schema.
 
 ## [Unreleased]
 
+(nothing yet)
+
+
+## [0.12.0] - 2026-10-24
+
+Fifth scheduled release in the "release every 3 versions" cadence.
+Rolls up v0.11 (bundle linter + catalog expansion) and v0.12
+(audit tooling + dependency sweep).
+
+This is the pre-v1.0 audit checkpoint. The engine, CLI, bundle
+schema, and output formats are now considered stable for the
+purposes of patch releases; semver-visible breakage will land
+with a v1.0.0 tag you cut when you're ready.
+
+### Added (v0.12 work)
+- `tests/fuzz_proptest.rs`: proptest coverage over the parse hot
+  path. 2048 cases each on the tokenizer, skeleton builder, and
+  every structured format parser (syslog, json, kv, cef, leef).
+  No panics, no crashes, deterministic output for the same input.
+- `deny.toml`: cargo-deny policy. Allow-list MIT / Apache / BSD /
+  ISC / MPL / Unicode / Zlib / Unlicense / 0BSD, deny unknown
+  registries and git sources, warn on multi-version pulls.
+- Documented ignores for the three ratatui-transitive advisories
+  (paste 1.0.15, lru 0.12.5 x2) with pointers to the ratatui 0.30
+  bump that closed them.
+- `cargo deny check` wired into the weekly audit workflow via
+  `EmbarkStudios/cargo-deny-action@v2`.
+
+### Changed
+- Dependency sweep: ratatui 0.27 -> 0.30.2, crossterm 0.27 ->
+  0.29, compact_str 0.7 -> 0.10, toml 0.8 -> 1.1, notify 6 -> 8,
+  criterion 0.5 -> 0.8. ratatui breakage: `Frame::size()` ->
+  `Frame::area()`, `Table::highlight_style` -> `row_highlight_style`.
+  Everything else was a clean bump.
+- The three cargo-audit advisories flagged on v0.1.1 are no
+  longer flagged (paste and lru 0.12.5 both dropped out of the
+  dep tree with the ratatui upgrade).
+- GitHub Actions: `softprops/action-gh-release` -> v3,
+  `actions/upload-artifact` -> v7, `actions/download-artifact`
+  -> v8. `dtolnay/rust-toolchain` is now dependabot-ignored
+  since its "versions" are Rust toolchain tags, not action
+  releases.
+
+### Known gaps carried into v1.0
+Documented in `SECURITY.md`:
+- No LRU eviction on `--max-patterns` cap (silent drop).
+- Memory bound is advisory, not enforced.
+- No per-match regex wall-clock timeout.
+- No chroot/seccomp sandbox beyond the systemd unit's hardening.
+
 ### Added (v0.11 work)
 - `logfold --lint <path>` subcommand validates one or more TOML
   bundles. Walks directories, prints `ok` / `err` per file, exits
@@ -359,7 +409,8 @@ Carried forward as audit items for v0.12:
 - No chroot or seccomp sandbox for root deployments.
 
 
-[Unreleased]: https://github.com/YanivSaar/LogFold/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/YanivSaar/LogFold/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/YanivSaar/LogFold/releases/tag/v0.12.0
 [0.10.0]: https://github.com/YanivSaar/LogFold/releases/tag/v0.10.0
 [0.7.0]: https://github.com/YanivSaar/LogFold/releases/tag/v0.7.0
 [0.4.0]: https://github.com/YanivSaar/LogFold/releases/tag/v0.4.0

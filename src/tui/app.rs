@@ -293,7 +293,7 @@ fn run_loop(
 }
 
 fn render(frame: &mut Frame<'_>, app: &App) {
-    let area = frame.size();
+    let area = frame.area();
     let chunks = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(0),

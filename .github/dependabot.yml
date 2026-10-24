@@ -28,3 +28,9 @@ updates:
     labels:
       - dependencies
       - github-actions
+    ignore:
+      # dtolnay/rust-toolchain uses the Rust toolchain version
+      # ("1.75", "stable", ...) as its tag, not a SemVer action
+      # version. Dependabot would otherwise churn PRs trying to
+      # move our MSRV job to the latest nightly tag.
+      - dependency-name: "dtolnay/rust-toolchain"

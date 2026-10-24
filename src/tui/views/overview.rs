@@ -140,7 +140,7 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &OverviewState) {
     )
     .header(header_row)
     .block(Block::default().borders(Borders::ALL).title(" patterns "))
-    .highlight_style(theme::selected_style());
+    .row_highlight_style(theme::selected_style());
 
     let mut ts = TableState::default();
     ts.select(Some(state.selected));

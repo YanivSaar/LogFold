@@ -1,6 +1,6 @@
 [package]
 name         = "logfold"
-version      = "0.10.0"
+version      = "0.12.0"
 edition      = "2021"
 rust-version = "1.75"
 description  = "Zero-config log pattern folder and anomaly detector"
@@ -13,21 +13,21 @@ categories   = ["command-line-utilities"]
 
 [dependencies]
 tokio             = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "fs", "net", "sync", "signal", "time"] }
-ratatui           = { version = "0.27", optional = true }
-crossterm         = { version = "0.27", optional = true }
+ratatui           = { version = "0.30", optional = true }
+crossterm         = { version = "0.29", optional = true }
 clap              = { version = "4", features = ["derive"] }
 dashmap           = "6"
 crossbeam-channel = "0.5"
 parking_lot       = "0.12"
-compact_str       = "0.7"
+compact_str       = "0.10"
 ahash             = "0.8"
 smallvec          = { version = "1", features = ["const_generics"] }
 indexmap          = "2"
 serde             = { version = "1", features = ["derive"] }
 serde_json        = "1"
-toml              = "0.8"
+toml              = "1"
 globset           = "0.4"
-notify            = { version = "6", optional = true }
+notify            = { version = "8", optional = true }
 regex             = { version = "1", features = ["perf"] }
 tracing           = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -38,7 +38,7 @@ arboard           = { version = "3", optional = true }
 reqwest           = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 flate2            = { version = "1", optional = true }
 zstd              = { version = "0.13", optional = true }
-maxminddb         = { version = "0.24", optional = true }
+maxminddb         = { version = "0.27", optional = true }
 hyper             = { version = "1", features = ["server", "http1"], optional = true }
 hyper-util        = { version = "0.1", features = ["tokio"], optional = true }
 http-body-util    = { version = "0.1", optional = true }
@@ -65,7 +65,7 @@ prometheus   = ["dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:bytes"
 [dev-dependencies]
 insta      = { version = "1", features = ["yaml"] }
 proptest   = "1"
-criterion  = { version = "0.5", features = ["html_reports"] }
+criterion  = { version = "0.8", features = ["html_reports"] }
 
 [[bench]]
 name    = "hot_path"

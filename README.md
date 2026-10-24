@@ -7,7 +7,7 @@
 [![Release](https://github.com/YanivSaar/LogFold/actions/workflows/release.yml/badge.svg)](https://github.com/YanivSaar/LogFold/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
-[![Status](https://img.shields.io/badge/status-v0.1-brightgreen.svg)](https://github.com/YanivSaar/LogFold/releases)
+[![Status](https://img.shields.io/badge/status-v0.12-brightgreen.svg)](https://github.com/YanivSaar/LogFold/releases)
 
 `logfold` reads any log stream, folds repetitive lines into counted
 patterns, and surfaces anomalies at the top. It runs as a single
@@ -27,22 +27,48 @@ logfold /var/log/auth.log --learn               # export learned bundles
 ## Features
 
 - **Pattern folding.** Tokenise, build a skeleton with typed slots
-  (`{IP}`, `{USER}`, `{NUM}`), FNV-1a hash, upsert. Near-miss
-  variants fold together via bounded token Levenshtein.
+  (`{IP}`, `{USER}`, `{PORT}`, `{NUM}`, ...), FNV-1a hash, upsert.
+  Near-miss variants fold together via bounded token Levenshtein.
+- **Format-aware parsing.** Six base parsers behind `[parse]
+  format = "..."` in each bundle: raw, syslog (RFC 3164 / 5424),
+  JSON, logfmt / key=value, ArcSight CEF, IBM LEEF, and
+  ModSecurity v3 JSON. Falls back to raw tokenisation on parse
+  miss.
+- **Context promotion.** Bundle `[[context_types]]` entries
+  coerce the WORD or NUM after a configured anchor into the
+  right typed slot ("for alice" -> `{USER}`, "port 22" -> `{PORT}`).
 - **Anomaly scoring.** Composite score from frequency, rate spike,
-  cross-correlation, path suspicion, and severity hint. Badges:
-  `NEW`, `RARE`, `SPIKE`, `CROSS`, `NORM`, `FOLD`.
-- **Format detection.** Path hints and content probing pick the
-  right bundle automatically. Falls back to a generic parser if
-  nothing matches.
-- **ModSecurity support.** Audit logs with `A..Z` section markers
-  are grouped into whole-event records before folding.
-- **Live redraw TUI.** Overview, Detail, Sources, Timeline views
-  at 20 Hz. Panic hook restores raw mode on crash.
+  cross-correlation, path suspicion, bundle severity, and a
+  compiled-in correlation rule pack. Badges: `NEW`, `RARE`,
+  `SPIKE`, `CROSS`, `NORM`, `FOLD`.
+- **Blue-team enrichment.** `--iocs <csv>` tags variable values
+  against a local indicator list; `--geoip <mmdb>` surfaces ASN
+  / country alongside IPs (behind the `geoip` feature).
+- **Correlation rules.** Shipped v0.9 rule pack covers SSH
+  brute-force, exec-from-tmp, ModSec CRITICAL, HTTP error flood,
+  and the classic brute-force-then-success cross-pattern rule.
+- **Alerting sink.** `--webhook <url>` POSTs anomaly events as
+  generic JSON, Slack message, or PagerDuty v2 payload
+  (`webhook` feature). Per-pattern cool-down built in.
+- **ModSecurity support.** v2 audit log section marker grouping
+  and v3 JSON serial format, both opt-in via bundle `[parse]`.
+- **50 compiled-in bundles.** auth / web / mail / database /
+  firewall / vpn / security / cloud / containers / dns / system.
+- **Live redraw TUI.** Overview, Detail (Variables / Score
+  Breakdown / Raw Lines sub-tabs), Sources, Timeline (real
+  bucket sparklines). Filter with `f` or `/`. Panic hook
+  restores raw mode on crash.
 - **Multiple output modes.** TUI, plain-text, JSON, NDJSON.
+  Prometheus `/metrics` endpoint (`prometheus` feature).
 - **Follow mode.** Inode-aware rotation detection via `notify`.
-- **Learn mode.** Export observed patterns as a TOML bundle you
-  can commit.
+  journald sources via `journald:<unit>`. Transparent `.gz` and
+  `.zst` decompression on file sources (`compression` feature).
+- **State persistence.** `--state <path>` saves and restores the
+  pattern registry across restarts.
+- **Bundle linter.** `logfold --lint <path>` validates one or
+  more bundle TOMLs.
+- **Learn mode.** `--learn` exports observed patterns as a
+  committable TOML bundle grouped by inferred source.
 - **Fast.** About 1.29 M lines/sec on the fold hot path, single
   thread, release build.
 
@@ -506,23 +532,31 @@ cargo test --features "tui watcher" --test detection_tests
 
 ## Roadmap
 
-v0.1 shipped the engine, TUI, detection FSM, and the first 20
-bundles. The next eleven releases ladder up to a full bug and
-security audit before v1.0.
+v0.1 through v0.12 are shipped. v0.12 is the pre-1.0 audit
+checkpoint; v1.0 is a semver commitment and gets cut by the
+maintainer when the four known gaps in `SECURITY.md` are
+closed.
 
-Headline items on the way:
+Shipped on the way to v1.0:
 
 - **v0.2** base syslog parser, bundle `context_types` wiring
 - **v0.3** Detail sub-tabs, Timeline real buckets, filter and search
 - **v0.4** JSON / KV / CEF / LEEF parsers
 - **v0.5** journald source, `.gz` and `.zst` input
 - **v0.6** webhook / Slack / PagerDuty alerting
-- **v0.7** IOC enrichment, GeoIP and ASN annotation
-- **v0.8** ModSec-aware Detail panel, v3 JSON audit log parser
+- **v0.7** IOC enrichment, GeoIP annotation
+- **v0.8** ModSec v3 JSON audit log parser
 - **v0.9** Sigma-lite correlation rules
-- **v0.10** Prometheus `/metrics`, state persistence, packaging
-- **v0.11** 100 more bundles, bundle linter, community index
-- **v0.12** audit, performance regression, API freeze, v1.0
+- **v0.10** Prometheus `/metrics`, state persistence, systemd unit
+- **v0.11** bundle linter, catalog grown to 50 bundles
+- **v0.12** proptest coverage, cargo-deny policy, dependency sweep
+
+The four known gaps carried into v1.0 (see `SECURITY.md`):
+
+- No LRU eviction on `--max-patterns` cap (silent drop).
+- Memory bound is advisory, not enforced.
+- No per-match regex wall-clock timeout.
+- No chroot / seccomp sandbox beyond the systemd unit's hardening.
 
 
 ## Contributing

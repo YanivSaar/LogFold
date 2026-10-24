@@ -88,9 +88,8 @@ jobs:
       - run: cargo build --release --target x86_64-unknown-linux-musl --features "tui watcher" --locked
 
   audit:
-    name: Security audit (advisory)
+    name: Security audit
     runs-on: ubuntu-latest
-    continue-on-error: true
     permissions:
       contents: read
       issues: write

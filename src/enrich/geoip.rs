@@ -30,7 +30,8 @@ impl GeoIp {
     /// database carries ASN data for `ip`.
     pub fn lookup_asn(&self, ip: &str) -> Option<String> {
         let addr: IpAddr = ip.parse().ok()?;
-        let asn: maxminddb::geoip2::Asn = self.reader.lookup(addr).ok()?;
+        let result = self.reader.lookup(addr).ok()?;
+        let asn: maxminddb::geoip2::Asn = result.decode().ok()??;
         let number = asn.autonomous_system_number?;
         let org = asn.autonomous_system_organization.unwrap_or("unknown");
         Some(format!("AS{number} {org}"))
@@ -40,7 +41,8 @@ impl GeoIp {
     /// carries country data for `ip`.
     pub fn lookup_country(&self, ip: &str) -> Option<String> {
         let addr: IpAddr = ip.parse().ok()?;
-        let rec: maxminddb::geoip2::Country = self.reader.lookup(addr).ok()?;
-        rec.country?.iso_code.map(String::from)
+        let result = self.reader.lookup(addr).ok()?;
+        let rec: maxminddb::geoip2::Country = result.decode().ok()??;
+        rec.country.iso_code.map(String::from)
     }
 }
