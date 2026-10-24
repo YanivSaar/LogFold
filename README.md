@@ -3,6 +3,8 @@
 > Zero-config log pattern folder and anomaly detector for sysadmins,
 > SREs, and blue teams.
 
+[![CI](https://github.com/YanivSaar/LogFold/actions/workflows/ci.yml/badge.svg)](https://github.com/YanivSaar/LogFold/actions/workflows/ci.yml)
+[![Release](https://github.com/YanivSaar/LogFold/actions/workflows/release.yml/badge.svg)](https://github.com/YanivSaar/LogFold/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 [![Status](https://img.shields.io/badge/status-v0.1-brightgreen.svg)](https://github.com/YanivSaar/LogFold/releases)
@@ -394,6 +396,39 @@ cargo fmt --check
 cargo clippy --features "tui watcher" --no-deps -- -D warnings
 cargo test --features "tui watcher"
 ```
+
+
+## Release process
+
+Releases are cut by pushing a signed annotated tag matching
+`v*.*.*`. The `release.yml` workflow then:
+
+1. Re-runs `cargo fmt --check`, `cargo clippy -- -D warnings`,
+   and the full test suite on the exact tagged commit (the gate).
+2. Cross-compiles for six targets: Linux x86_64 and aarch64 (musl
+   and gnu), macOS x86_64 and aarch64.
+3. Packages each build as a `.tar.gz` with the binary, `README.md`,
+   `LICENSE`, and `SECURITY.md`.
+4. Computes SHA-256 for every tarball plus a combined `SHA256SUMS`.
+5. Creates the GitHub Release, uploads the tarballs and
+   checksums, and auto-generates release notes from commits.
+
+Pre-release tags (e.g. `v0.2.0-rc.1`) are published as
+pre-releases automatically.
+
+Local workflow to cut `vX.Y.Z`:
+
+```sh
+# All CI must be green on main first.
+git tag -a vX.Y.Z -m "logfold vX.Y.Z"
+git push origin vX.Y.Z
+# Watch the Release workflow at:
+#   https://github.com/YanivSaar/LogFold/actions/workflows/release.yml
+```
+
+To re-run a release for an already-pushed tag (e.g. after fixing
+the workflow itself), use the "Run workflow" button on the
+Release action and pass the tag name as input.
 
 
 ## Security
