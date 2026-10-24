@@ -16,6 +16,19 @@ probe_threshold = 0.15
 [parse]
 format = "syslog"
 
+
+[[context_types]]
+after = "for"
+type = "USER"
+
+[[context_types]]
+after = "user"
+type = "USER"
+
+[[context_types]]
+after = "by"
+type = "USER"
+
 [[pattern]]
 skeleton = "pam_unix({*}:session): session opened for user {USER}"
 label    = "session opened"

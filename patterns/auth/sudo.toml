@@ -23,6 +23,19 @@ probe_threshold = 0.1
 [parse]
 format = "syslog"
 
+
+[[context_types]]
+after = "for"
+type = "USER"
+
+[[context_types]]
+after = "user"
+type = "USER"
+
+[[context_types]]
+after = "by"
+type = "USER"
+
 [[pattern]]
 skeleton = "sudo[*]: {USER} : TTY={*} ; PWD={PATH} ; USER={USER} ; COMMAND={PATH}"
 label    = "sudo command"

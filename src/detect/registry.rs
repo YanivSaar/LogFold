@@ -28,7 +28,8 @@ impl Trust {
     const USER_REGEX_DFA_LIMIT: usize = 100_000;
 }
 
-use crate::types::Severity;
+use crate::parse::skeleton::ContextRule;
+use crate::types::{Severity, TokenType};
 
 /// Bundles baked into the binary at compile time. These ship as a
 /// default library; `--patterns-dir` adds more at runtime.
@@ -54,6 +55,10 @@ pub struct Bundle {
 
     /// How to normalise a line before tokenisation.
     pub format: ParseFormat,
+
+    /// WORD-after-WORD promotion rules consulted by the skeleton
+    /// builder. Empty vec means no promotion (hot path stays zero-cost).
+    pub context_types: Vec<ContextRule>,
 
     pub seeded: Vec<SeededPattern>,
 }
@@ -204,6 +209,16 @@ struct RawBundle {
     parse: RawParse,
     #[serde(default)]
     pattern: Vec<RawPattern>,
+    #[serde(default, rename = "context_types")]
+    context_types: Vec<RawContextRule>,
+}
+
+/// On-disk schema for a single `[[context_types]]` entry.
+#[derive(Debug, Deserialize)]
+struct RawContextRule {
+    after: String,
+    #[serde(rename = "type")]
+    ty: TokenType,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -350,6 +365,15 @@ impl RawBundle {
             }
         };
 
+        let context_types = self
+            .context_types
+            .into_iter()
+            .map(|r| ContextRule {
+                after: r.after.into(),
+                ty: r.ty,
+            })
+            .collect();
+
         Ok(Bundle {
             id: self.meta.id.into(),
             name: self.meta.name.into(),
@@ -361,6 +385,7 @@ impl RawBundle {
             probe_threshold: self.detect.probe_threshold,
             multiline,
             format,
+            context_types,
             seeded,
         })
     }

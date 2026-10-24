@@ -18,6 +18,7 @@ use crate::detect::registry::{BundleRegistry, DetectConfig, MultilineMode, Parse
 use crate::engine::registry::PatternRegistry;
 use crate::ingest::multiline::Assembler;
 use crate::parse::formats::syslog;
+use crate::parse::skeleton::ContextRule;
 use crate::parse::{skeleton, tokenizer, Token};
 
 /// Hard cap on a single logical line we accept from any source.
@@ -65,6 +66,7 @@ pub struct ParseSpec {
     pub bundle_id: String,
     pub format: ParseFormat,
     pub multiline: MultilineMode,
+    pub context_types: Vec<ContextRule>,
 }
 
 impl ParseSpec {
@@ -74,11 +76,13 @@ impl ParseSpec {
                 bundle_id: bundle_id.to_string(),
                 format: b.format,
                 multiline: b.multiline,
+                context_types: b.context_types.clone(),
             },
             None => ParseSpec {
                 bundle_id: bundle_id.to_string(),
                 format: ParseFormat::default(),
                 multiline: MultilineMode::default(),
+                context_types: Vec::new(),
             },
         }
     }
@@ -363,6 +367,6 @@ fn fold_one(line: &str, engine: &PatternRegistry, spec: &ParseSpec) {
     }
     let mut skel = CompactString::default();
     let mut slots = Vec::with_capacity(8);
-    skeleton::build(&tokens, &mut skel, &mut slots);
+    skeleton::build_with_context(&tokens, &spec.context_types, &mut skel, &mut slots);
     engine.upsert(&skel, &slots, &tokens, &spec.bundle_id, Instant::now());
 }

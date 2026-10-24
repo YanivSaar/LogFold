@@ -16,15 +16,24 @@ CLI surface and bundle schema.
   5424 with and without structured data, and non-syslog fall-through.
 - `ParseFormat` enum (`Raw` default, `Syslog`). `[parse] format = "..."`
   per bundle controls which path runs.
-- `ParseSpec` struct carries bundle_id, format, multiline through the
-  fold path so follow-mode threads don't need the `BundleRegistry`
-  on the hot path.
+- `ParseSpec` struct carries bundle_id, format, multiline, and
+  context_types through the fold path so follow-mode threads don't
+  need the `BundleRegistry` on the hot path.
 - `format = "syslog"` enabled on sshd, sudo, su, pam, cron, kern,
   syslog, postfix, iptables, fail2ban. ModSec and web bundles stay
   on raw tokenisation.
-- `tests/syslog_tests.rs`: proves envelope stripping reduces the sshd
-  fixture's pattern count and that PID-only differences no longer
-  fork a pattern.
+- Bundle `[[context_types]]` honored by the skeleton builder. Rules
+  of the form `{ after = "<word>", type = "<TAG>" }` promote the
+  WORD or NUM token immediately after a matching anchor to a typed
+  slot. Case-insensitive match. Only WORD/NUM are promotable;
+  already-specific types (IP, Email, Url, Path, Uuid, Hash, Date)
+  stay as-is to avoid clobbering strong structural signals.
+- sshd, sudo, su, pam bundles declare their context rules
+  (`for→USER`, `user→USER`, `port→PORT`, `by→USER`).
+- `tests/syslog_tests.rs` and `tests/context_types_tests.rs`: prove
+  envelope stripping plus context promotion collapse the sshd
+  fixture from ~10 patterns at v0.1 to ≤6 at v0.2, and that
+  user/port tokens fold across the fixture.
 
 
 ## [0.1.1] - 2026-10-24
