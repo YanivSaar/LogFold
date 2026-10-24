@@ -25,6 +25,8 @@ struct PatternOut<'a> {
     /// 24 slots of 5-minute buckets covering the last 2 hours,
     /// oldest-first.
     rate_buckets: [u32; 24],
+    /// Correlation rules that fired for this pattern (v0.9).
+    rules: Vec<&'static str>,
     first_seen_unix_ms: u128,
     last_seen_unix_ms: u128,
     vars: Vec<VarOut<'a>>,
@@ -64,8 +66,10 @@ pub fn render<W: Write>(
     reports: &[SourceReport],
     settings: &Settings,
     enricher: &crate::enrich::Enricher,
+    rules: &crate::rules::RuleSet,
 ) -> std::io::Result<()> {
     let peers = scorer::build_peer_vars(snaps);
+    let rule_hits = rules.evaluate_all(snaps);
     let process_start = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
@@ -75,7 +79,10 @@ pub fn render<W: Write>(
     let converted: Vec<PatternOut<'_>> = snaps
         .iter()
         .map(|s| {
-            let score = scorer::compute_score(s, &peers) + crate::enrich::score_bump(s, enricher);
+            let rule_bump = rule_hits.get(&s.id).map(|h| h.score_bump).unwrap_or(0);
+            let score = scorer::compute_score(s, &peers)
+                + crate::enrich::score_bump(s, enricher)
+                + rule_bump;
             let badge = scorer::classify_badge(s, score, settings.min_fold).label();
             let first_delta = now_instant
                 .saturating_duration_since(s.first_seen)
@@ -93,6 +100,10 @@ pub fn render<W: Write>(
                 peak_bucket: s.peak_bucket,
                 mean_bucket: s.mean_bucket,
                 rate_buckets: s.rate_buckets,
+                rules: rule_hits
+                    .get(&s.id)
+                    .map(|h| h.rule_ids.clone())
+                    .unwrap_or_default(),
                 first_seen_unix_ms: process_start.saturating_sub(first_delta),
                 last_seen_unix_ms: process_start.saturating_sub(last_delta),
                 vars: s

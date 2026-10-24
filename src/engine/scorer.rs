@@ -117,6 +117,19 @@ fn path_suspicion(snap: &PatternSnapshot) -> u32 {
     0
 }
 
+/// Build a per-snapshot score bump from the compiled-in rule pack
+/// plus any user-supplied rules. Caller adds this to the output of
+/// [`compute_score`] and to the webhook / enrichment bump.
+///
+/// The returned HashMap is cheap to probe per pattern and already
+/// aggregated across all rules.
+pub fn rule_hits(
+    snaps: &[PatternSnapshot],
+    rules: &crate::rules::RuleSet,
+) -> std::collections::HashMap<u64, crate::rules::RuleHit> {
+    rules.evaluate_all(snaps)
+}
+
 /// Classify a pattern into one of the display badges.
 pub fn classify_badge(snap: &PatternSnapshot, score: u32, fold_threshold: u64) -> Badge {
     if score >= NEW_SCORE_FLOOR && snap.count == 1 {

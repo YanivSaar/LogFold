@@ -8,6 +8,33 @@ CLI surface and bundle schema.
 
 ## [Unreleased]
 
+### Added (v0.9 work)
+- `src/rules/`: Sigma-lite correlation rule engine. Each rule
+  implements the `Rule` trait: walk the snapshot set, return the
+  pattern ids it wants to tag, and the engine aggregates
+  per-pattern `RuleHit` records (fired rule ids + combined score
+  bump). Runs on the snapshot path, not the hot path.
+- Compiled-in rule pack with five rules:
+  - `ssh-brute-force`: Failed-password count >= 20 in an sshd
+    bundle. +25.
+  - `exec-from-tmp`: PATH variable under /tmp/, /dev/shm/,
+    /var/tmp/, /private/tmp/. +10 (complements the base scorer's
+    `path_suspicion`).
+  - `modsec-critical`: ModSec bundle with CRITICAL in the fold
+    key. +30.
+  - `nginx-error-flood`: web-bundle pattern with status NUM at
+    count >= 100. +15.
+  - `cross-sshd-brute-success`: cross-pattern. When any sshd
+    Failed-password pattern has count >= 10, every sshd
+    Accepted-password pattern gets +40 (classic brute-force to
+    success).
+- Rule bumps added into the composite score in text output,
+  JSON output, and the webhook sink.
+- JSON output's PatternOut gains a `rules: [&str]` field listing
+  which rules fired.
+- 7 unit tests covering individual rule logic and the
+  aggregation path.
+
 ### Added (v0.8 work)
 - `src/parse/formats/modsec_v3.rs`: ModSecurity v3 JSON serial
   audit log parser. One JSON object per transaction; extracts

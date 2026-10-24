@@ -8,6 +8,7 @@ pub mod enrich;
 pub mod ingest;
 pub mod output;
 pub mod parse;
+pub mod rules;
 pub mod tui;
 pub mod types;
 
@@ -258,8 +259,9 @@ fn run_with_tui(
 fn render_text(cfg: &Config, engine: &PatternRegistry, reports: &[SourceReport]) -> Result<()> {
     let snaps = engine.snapshot();
     let enricher = load_enricher(cfg);
+    let rules = rules::RuleSet::default_pack();
     #[cfg(feature = "webhook")]
-    maybe_fire_webhook(cfg, &snaps, &enricher);
+    maybe_fire_webhook(cfg, &snaps, &enricher, &rules);
     let mut out = std::io::stdout().lock();
 
     if cfg.json || cfg.ndjson {
@@ -268,7 +270,7 @@ fn render_text(cfg: &Config, engine: &PatternRegistry, reports: &[SourceReport])
             min_fold: cfg.min_fold,
             top_values_per_var: 10,
         };
-        output::json::render(&mut out, &snaps, reports, &json_cfg, &enricher)?;
+        output::json::render(&mut out, &snaps, reports, &json_cfg, &enricher, &rules)?;
         return Ok(());
     }
 
@@ -290,7 +292,7 @@ fn render_text(cfg: &Config, engine: &PatternRegistry, reports: &[SourceReport])
         min_fold: cfg.min_fold,
         anomaly_threshold: cfg.anomaly_threshold,
     };
-    output::text::render(&mut out, &snaps, &text_cfg, &enricher)?;
+    output::text::render(&mut out, &snaps, &text_cfg, &enricher, &rules)?;
 
     if !cfg.quiet {
         let total: u64 = reports.iter().map(|r| r.lines).sum();
@@ -342,6 +344,7 @@ fn maybe_fire_webhook(
     cfg: &Config,
     snaps: &[crate::engine::pattern::PatternSnapshot],
     enricher: &enrich::Enricher,
+    rules: &rules::RuleSet,
 ) {
     let Some(opts) = cfg.webhook.as_ref() else {
         return;
@@ -367,9 +370,12 @@ fn maybe_fire_webhook(
         }
     };
     let peers = engine::scorer::build_peer_vars(snaps);
+    let rule_hits = rules.evaluate_all(snaps);
     for snap in snaps {
-        let score =
-            engine::scorer::compute_score(snap, &peers) + enrich::score_bump(snap, enricher);
+        let rule_bump = rule_hits.get(&snap.id).map(|h| h.score_bump).unwrap_or(0);
+        let score = engine::scorer::compute_score(snap, &peers)
+            + enrich::score_bump(snap, enricher)
+            + rule_bump;
         let badge = engine::scorer::classify_badge(snap, score, cfg.min_fold);
         sink.try_notify(snap, score, badge);
     }
