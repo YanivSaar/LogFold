@@ -19,4 +19,5 @@ pub mod cef;
 pub mod json;
 pub mod kv;
 pub mod leef;
+pub mod modsec_v3;
 pub mod syslog;

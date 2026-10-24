@@ -8,7 +8,26 @@ CLI surface and bundle schema.
 
 ## [Unreleased]
 
-(nothing yet)
+### Added (v0.8 work)
+- `src/parse/formats/modsec_v3.rs`: ModSecurity v3 JSON serial
+  audit log parser. One JSON object per transaction; extracts
+  client_ip, method, uri, status, and the full ruleId list from
+  `transaction.messages[].details`. Builds a synthesised fold-key
+  of the form `modsec rule <id> <severity>: <msg> // <method>
+  <uri> -> <status>` so unrelated attack payloads for the same
+  rule fold together.
+- `ParseFormat::ModsecV3` and the `format = "modsec-v3"` bundle
+  opt-in.
+- `patterns/security/modsec-v3.toml` bundle with path hints for
+  `**/modsec_audit.log*` and line probes on the v3-specific
+  fields.
+- `tests/fixtures/modsec-v3/sample.log` fixture with four
+  transactions (two of the same rule+severity on different URIs,
+  one SQLi, one clean 200).
+- `tests/modsec_v3_tests.rs` covers bundle schema, same-rule
+  folding across URIs, and fixture pattern count.
+- Long-message truncation in the fold key (cap 80 chars) so a
+  giant embedded request body can't inflate the skeleton.
 
 
 ## [0.7.0] - 2026-10-24

@@ -91,6 +91,8 @@ pub enum ParseFormat {
     Cef,
     /// IBM LEEF; tokenise the `EventID` field.
     Leef,
+    /// ModSecurity v3 JSON serial (one object per transaction).
+    ModsecV3,
 }
 
 /// A `[[pattern]]` entry — a named canonical skeleton the engine
@@ -366,6 +368,7 @@ impl RawBundle {
             Some("kv") | Some("logfmt") => ParseFormat::Kv,
             Some("cef") => ParseFormat::Cef,
             Some("leef") => ParseFormat::Leef,
+            Some("modsec-v3") | Some("modsec_v3") => ParseFormat::ModsecV3,
             Some(other) => {
                 tracing::warn!(
                     bundle = %self.meta.id,

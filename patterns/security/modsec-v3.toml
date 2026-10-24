@@ -1,0 +1,22 @@
+[meta]
+id          = "modsec-v3"
+name        = "ModSecurity v3 JSON audit log"
+category    = "security"
+description = "libmodsecurity v3 serial format (one JSON transaction per line)"
+
+[detect]
+path_hints = [
+  "**/modsec_audit.log*",
+  "**/modsec/*.json",
+  "/var/log/modsec*",
+]
+line_probes = [
+  "\"transaction\"\\s*:",
+  "\"ruleId\"\\s*:",
+  "\"client_ip\"\\s*:",
+  "\"producer\"\\s*:",
+]
+probe_threshold = 0.3
+
+[parse]
+format = "modsec-v3"

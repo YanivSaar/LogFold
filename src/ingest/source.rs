@@ -17,7 +17,7 @@ use crate::detect::probe::{Detector, Verdict};
 use crate::detect::registry::{BundleRegistry, DetectConfig, MultilineMode, ParseFormat};
 use crate::engine::registry::PatternRegistry;
 use crate::ingest::multiline::Assembler;
-use crate::parse::formats::{cef, json, kv, leef, syslog};
+use crate::parse::formats::{cef, json, kv, leef, modsec_v3, syslog};
 use crate::parse::skeleton::ContextRule;
 use crate::parse::{skeleton, tokenizer, Token};
 
@@ -500,6 +500,7 @@ fn fold_one(line: &str, engine: &PatternRegistry, spec: &ParseSpec) {
     // so the borrow below outlives the match arm.
     let owned_json: Option<String> = match spec.format {
         ParseFormat::Json => json::parse(line).map(|p| p.msg),
+        ParseFormat::ModsecV3 => modsec_v3::parse(line).map(|p| p.fold_key),
         _ => None,
     };
     let effective: &str = match spec.format {
@@ -509,6 +510,7 @@ fn fold_one(line: &str, engine: &PatternRegistry, spec: &ParseSpec) {
             None => line,
         },
         ParseFormat::Json => owned_json.as_deref().unwrap_or(line),
+        ParseFormat::ModsecV3 => owned_json.as_deref().unwrap_or(line),
         ParseFormat::Kv => kv::parse(line).map(|p| p.msg).unwrap_or(line),
         ParseFormat::Cef => cef::parse(line).map(|p| p.name).unwrap_or(line),
         ParseFormat::Leef => leef::parse(line).map(|p| p.event_id).unwrap_or(line),
