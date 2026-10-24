@@ -4,6 +4,7 @@
 
 pub mod detect;
 pub mod engine;
+pub mod enrich;
 pub mod ingest;
 pub mod output;
 pub mod parse;
@@ -42,6 +43,15 @@ pub struct Config {
     /// so callers compile against both feature configurations; v0.6+
     /// only wires it in when the `webhook` feature is on.
     pub webhook: Option<WebhookOptions>,
+    /// Enrichment sources (IOC CSV, GeoIP mmdb). v0.7.
+    pub enrichment: EnrichmentOptions,
+}
+
+/// Enrichment file paths.
+#[derive(Debug, Clone, Default)]
+pub struct EnrichmentOptions {
+    pub iocs: Option<PathBuf>,
+    pub geoip: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +89,7 @@ impl Default for Config {
             detect: DetectConfig::default(),
             learn: None,
             webhook: None,
+            enrichment: EnrichmentOptions::default(),
         }
     }
 }
@@ -184,6 +195,7 @@ fn run_with_tui(
     bundles: Arc<BundleRegistry>,
     reports: Arc<Mutex<Vec<SourceReport>>>,
 ) -> Result<()> {
+    let enricher = Arc::new(load_enricher(&cfg));
     let shutdown = Arc::new(AtomicBool::new(false));
     let mut handles = Vec::new();
 
@@ -228,6 +240,7 @@ fn run_with_tui(
         shutdown.clone(),
         cfg.anomaly_threshold,
         cfg.min_fold,
+        enricher,
     )?;
 
     shutdown.store(true, Ordering::Relaxed);
@@ -244,8 +257,9 @@ fn run_with_tui(
 
 fn render_text(cfg: &Config, engine: &PatternRegistry, reports: &[SourceReport]) -> Result<()> {
     let snaps = engine.snapshot();
+    let enricher = load_enricher(cfg);
     #[cfg(feature = "webhook")]
-    maybe_fire_webhook(cfg, &snaps);
+    maybe_fire_webhook(cfg, &snaps, &enricher);
     let mut out = std::io::stdout().lock();
 
     if cfg.json || cfg.ndjson {
@@ -254,7 +268,7 @@ fn render_text(cfg: &Config, engine: &PatternRegistry, reports: &[SourceReport])
             min_fold: cfg.min_fold,
             top_values_per_var: 10,
         };
-        output::json::render(&mut out, &snaps, reports, &json_cfg)?;
+        output::json::render(&mut out, &snaps, reports, &json_cfg, &enricher)?;
         return Ok(());
     }
 
@@ -276,7 +290,7 @@ fn render_text(cfg: &Config, engine: &PatternRegistry, reports: &[SourceReport])
         min_fold: cfg.min_fold,
         anomaly_threshold: cfg.anomaly_threshold,
     };
-    output::text::render(&mut out, &snaps, &text_cfg)?;
+    output::text::render(&mut out, &snaps, &text_cfg, &enricher)?;
 
     if !cfg.quiet {
         let total: u64 = reports.iter().map(|r| r.lines).sum();
@@ -307,10 +321,28 @@ fn maybe_learn(cfg: &Config, engine: &PatternRegistry) -> Result<()> {
     Ok(())
 }
 
+/// Load the enricher once per run. Errors surface as warnings; the
+/// run proceeds with an empty enricher so a missing IOC file doesn't
+/// kill the ingest.
+fn load_enricher(cfg: &Config) -> enrich::Enricher {
+    enrich::Enricher::load(
+        cfg.enrichment.iocs.as_deref(),
+        cfg.enrichment.geoip.as_deref(),
+    )
+    .unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "enrichment load failed; continuing without");
+        enrich::Enricher::empty()
+    })
+}
+
 /// Resolve webhook config, build the sink, and run through every
 /// snapshot once. Short-circuits silently when no webhook is set.
 #[cfg(feature = "webhook")]
-fn maybe_fire_webhook(cfg: &Config, snaps: &[crate::engine::pattern::PatternSnapshot]) {
+fn maybe_fire_webhook(
+    cfg: &Config,
+    snaps: &[crate::engine::pattern::PatternSnapshot],
+    enricher: &enrich::Enricher,
+) {
     let Some(opts) = cfg.webhook.as_ref() else {
         return;
     };
@@ -336,7 +368,8 @@ fn maybe_fire_webhook(cfg: &Config, snaps: &[crate::engine::pattern::PatternSnap
     };
     let peers = engine::scorer::build_peer_vars(snaps);
     for snap in snaps {
-        let score = engine::scorer::compute_score(snap, &peers);
+        let score =
+            engine::scorer::compute_score(snap, &peers) + enrich::score_bump(snap, enricher);
         let badge = engine::scorer::classify_badge(snap, score, cfg.min_fold);
         sink.try_notify(snap, score, badge);
     }

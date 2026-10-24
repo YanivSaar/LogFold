@@ -5,6 +5,7 @@ use ratatui::widgets::{Block, Borders, Cell, Row, Table, TableState};
 
 use crate::engine::pattern::PatternSnapshot;
 use crate::engine::scorer;
+use crate::enrich::{self, Enricher};
 use crate::tui::theme;
 use crate::types::Badge;
 
@@ -23,7 +24,7 @@ pub struct ScoredRow {
 
 impl OverviewState {
     pub fn build(snaps: &[PatternSnapshot], min_fold: u64, anomaly_threshold: u32) -> Self {
-        Self::build_filtered(snaps, min_fold, anomaly_threshold, None)
+        Self::build_filtered(snaps, min_fold, anomaly_threshold, None, &Enricher::empty())
     }
 
     /// Same as [`build`] but applies an optional substring filter on
@@ -34,6 +35,7 @@ impl OverviewState {
         min_fold: u64,
         anomaly_threshold: u32,
         filter: Option<&str>,
+        enricher: &Enricher,
     ) -> Self {
         let peers = scorer::build_peer_vars(snaps);
         let needle = filter.map(|s| s.to_ascii_lowercase());
@@ -50,7 +52,8 @@ impl OverviewState {
             })
             .cloned()
             .map(|snap| {
-                let score = scorer::compute_score(&snap, &peers);
+                let score =
+                    scorer::compute_score(&snap, &peers) + enrich::score_bump(&snap, enricher);
                 let badge = scorer::classify_badge(&snap, score, min_fold);
                 ScoredRow { score, badge, snap }
             })

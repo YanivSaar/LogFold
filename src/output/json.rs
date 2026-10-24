@@ -63,6 +63,7 @@ pub fn render<W: Write>(
     snaps: &[PatternSnapshot],
     reports: &[SourceReport],
     settings: &Settings,
+    enricher: &crate::enrich::Enricher,
 ) -> std::io::Result<()> {
     let peers = scorer::build_peer_vars(snaps);
     let process_start = std::time::SystemTime::now()
@@ -74,7 +75,7 @@ pub fn render<W: Write>(
     let converted: Vec<PatternOut<'_>> = snaps
         .iter()
         .map(|s| {
-            let score = scorer::compute_score(s, &peers);
+            let score = scorer::compute_score(s, &peers) + crate::enrich::score_bump(s, enricher);
             let badge = scorer::classify_badge(s, score, settings.min_fold).label();
             let first_delta = now_instant
                 .saturating_duration_since(s.first_seen)

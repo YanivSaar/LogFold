@@ -22,6 +22,7 @@ use ratatui::widgets::Paragraph;
 
 use crate::engine::pattern::PatternSnapshot;
 use crate::engine::registry::PatternRegistry;
+use crate::enrich::Enricher;
 use crate::ingest::source::SourceReport;
 use crate::tui::theme;
 use crate::tui::views::{detail, help as helpv, overview, sources, timeline};
@@ -67,6 +68,7 @@ struct App {
     quit: bool,
     anomaly_threshold: u32,
     min_fold: u64,
+    enricher: Arc<Enricher>,
 }
 
 impl App {
@@ -75,9 +77,16 @@ impl App {
         reports: Vec<SourceReport>,
         anomaly_threshold: u32,
         min_fold: u64,
+        enricher: Arc<Enricher>,
     ) -> Self {
         let snaps = registry.snapshot();
-        let overview = overview::OverviewState::build(&snaps, min_fold, anomaly_threshold);
+        let overview = overview::OverviewState::build_filtered(
+            &snaps,
+            min_fold,
+            anomaly_threshold,
+            None,
+            &enricher,
+        );
         App {
             view: View::Overview,
             detail_tab: detail::Tab::default(),
@@ -90,6 +99,7 @@ impl App {
             quit: false,
             anomaly_threshold,
             min_fold,
+            enricher,
         }
     }
 
@@ -195,6 +205,7 @@ impl App {
             self.min_fold,
             self.anomaly_threshold,
             Some(&self.filter),
+            &self.enricher,
         );
     }
 
@@ -210,6 +221,7 @@ impl App {
             } else {
                 Some(&self.filter)
             },
+            &self.enricher,
         );
         // Preserve selection if it still fits.
         if old_selected < self.overview.rows.len() {
@@ -224,6 +236,7 @@ pub fn run(
     shutdown: Arc<AtomicBool>,
     anomaly_threshold: u32,
     min_fold: u64,
+    enricher: Arc<Enricher>,
 ) -> Result<()> {
     let mut terminal = enter_terminal()?;
     let result = run_loop(
@@ -233,6 +246,7 @@ pub fn run(
         shutdown.clone(),
         anomaly_threshold,
         min_fold,
+        enricher,
     );
     leave_terminal(&mut terminal)?;
     shutdown.store(true, Ordering::Relaxed);
@@ -246,9 +260,16 @@ fn run_loop(
     shutdown: Arc<AtomicBool>,
     anomaly_threshold: u32,
     min_fold: u64,
+    enricher: Arc<Enricher>,
 ) -> Result<()> {
     let initial_reports = reports.lock().clone();
-    let mut app = App::new(&registry, initial_reports, anomaly_threshold, min_fold);
+    let mut app = App::new(
+        &registry,
+        initial_reports,
+        anomaly_threshold,
+        min_fold,
+        enricher,
+    );
     let mut last_refresh = Instant::now();
     let refresh_period = Duration::from_millis(500);
 

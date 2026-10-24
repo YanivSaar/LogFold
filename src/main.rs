@@ -104,6 +104,17 @@ struct Cli {
     /// Can also be set via `LOGFOLD_PD_ROUTING_KEY` env var; CLI wins.
     #[arg(long, value_name = "KEY")]
     webhook_pd_routing_key: Option<String>,
+
+    /// IOC CSV (indicator,source,severity) consulted when scoring.
+    /// Matches on any variable value nudge the score and surface
+    /// as `IOC:` tags in the Detail view.
+    #[arg(long, value_name = "FILE")]
+    iocs: Option<PathBuf>,
+
+    /// MaxMind GeoIP database (ASN or Country). Requires the
+    /// `geoip` cargo feature.
+    #[arg(long, value_name = "FILE")]
+    geoip: Option<PathBuf>,
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -166,6 +177,10 @@ async fn main() -> Result<()> {
                 pd_routing_key: pd_key,
             }
         }),
+        enrichment: logfold::EnrichmentOptions {
+            iocs: cli.iocs,
+            geoip: cli.geoip,
+        },
     };
 
     logfold::run(cfg)

@@ -142,7 +142,7 @@ Pick the right target for your machine:
 | Linux ARM64 (Pi 4+, Graviton)     | `aarch64-unknown-linux-musl`     |
 | Linux ARM64 (dynamic, glibc)      | `aarch64-unknown-linux-gnu`      |
 | macOS Apple Silicon               | `aarch64-apple-darwin`           |
-| macOS Intel                       | `x86_64-apple-darwin`            |
+| macOS Intel                       | `cargo install logfold` (see below) |
 
 Quick check: `uname -s -m` tells you the OS and architecture.
 

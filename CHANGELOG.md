@@ -8,6 +8,41 @@ CLI surface and bundle schema.
 
 ## [Unreleased]
 
+(nothing yet)
+
+
+## [0.7.0] - 2026-10-24
+
+Third scheduled release in the "release every 3 versions" cadence.
+Rolls up v0.5 (compressed input + journald), v0.6 (webhook sink),
+and v0.7 (IOC + GeoIP enrichment).
+
+### Changed
+- `x86_64-apple-darwin` dropped from the release matrix. Free-tier
+  macOS Intel runners queue indefinitely; the target is being
+  retired by Apple. Intel Mac users install via
+  `cargo install logfold`. aarch64-apple-darwin (Apple Silicon)
+  still ships as a prebuilt tarball.
+
+### Added (v0.7 work)
+- `src/enrich/{mod,ioc,geoip}.rs`: an `Enricher` that loads
+  local IOC CSVs (indicator,source,severity) and optionally a
+  MaxMind GeoIP mmdb (behind the `geoip` feature). Matching a
+  variable value against the IOC set bumps the score by
+  `IOC_SCORE_BUMP` (25). GeoIP contributes informational
+  annotations only.
+- CLI flags `--iocs <FILE>` and `--geoip <FILE>` plus a new
+  `EnrichmentOptions` struct on `Config`.
+- Scoring pipelines in text/JSON output, the TUI Overview, and
+  the webhook sink all consult the enricher and add its score
+  bump. `pattern_annotations()` produces de-duplicated tags for
+  rendering (`IOC:source:severity`, `ASN:AS123 Org`, `CC:US`).
+- IocSet parsing covers comments, blank lines, and
+  severity-defaults-to-info; `is_safe_bundle_id`-style error
+  surface so broken CSVs don't take down ingest.
+- `tests/enrichment_tests.rs` covers IOC hit/miss, dedup across
+  variables, and the empty-enricher cheap-noop path.
+
 ### Added (v0.6 work)
 - Webhook sink behind the `webhook` cargo feature. Fires a
   fire-and-forget POST on NEW / SPIKE / CROSS badges whose score
@@ -227,7 +262,8 @@ Carried forward as audit items for v0.12:
 - No chroot or seccomp sandbox for root deployments.
 
 
-[Unreleased]: https://github.com/YanivSaar/LogFold/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/YanivSaar/LogFold/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/YanivSaar/LogFold/releases/tag/v0.7.0
 [0.4.0]: https://github.com/YanivSaar/LogFold/releases/tag/v0.4.0
 [0.1.1]: https://github.com/YanivSaar/LogFold/releases/tag/v0.1.1
 [0.1.0]: https://github.com/YanivSaar/LogFold/releases/tag/v0.1.0

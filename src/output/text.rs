@@ -16,6 +16,7 @@ use std::io::Write;
 
 use crate::engine::pattern::PatternSnapshot;
 use crate::engine::scorer;
+use crate::enrich::{self, Enricher};
 use crate::types::Badge;
 
 /// Config knobs the renderer needs.
@@ -30,12 +31,13 @@ pub fn render<W: Write>(
     out: &mut W,
     snaps: &[PatternSnapshot],
     cfg: &TextConfig,
+    enricher: &Enricher,
 ) -> std::io::Result<usize> {
     let peers = scorer::build_peer_vars(snaps);
     let mut scored: Vec<(u32, Badge, &PatternSnapshot)> = snaps
         .iter()
         .map(|s| {
-            let score = scorer::compute_score(s, &peers);
+            let score = scorer::compute_score(s, &peers) + enrich::score_bump(s, enricher);
             let badge = scorer::classify_badge(s, score, cfg.min_fold);
             (score, badge, s)
         })

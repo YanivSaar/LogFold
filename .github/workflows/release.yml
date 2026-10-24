@@ -60,9 +60,10 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             use-cross: true
-          - target: x86_64-apple-darwin
-            os: macos-13
-            use-cross: false
+          # Only aarch64 macOS. Free-tier x86_64 macOS runners
+          # (macos-13) queue indefinitely in practice; Apple Intel
+          # Macs are legacy as of 2026, so users on an Intel Mac
+          # install via `cargo install logfold` for now.
           - target: aarch64-apple-darwin
             os: macos-latest
             use-cross: false
