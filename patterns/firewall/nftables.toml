@@ -1,0 +1,18 @@
+[meta]
+id          = "nftables"
+name        = "nftables"
+category    = "firewall"
+description = "nftables NFLOG/kernel-prefixed packet drops"
+
+[detect]
+path_hints = ["**/kern.log*", "**/messages*"]
+process_hints = ["nftables", "kernel"]
+line_probes = [
+  "kernel: \\[.*\\] nft[a-z-]+:",
+  "IN=\\S+ OUT=",
+  "SRC=\\d+\\.\\d+\\.\\d+\\.\\d+ ",
+]
+probe_threshold = 0.3
+
+[parse]
+format = "syslog"

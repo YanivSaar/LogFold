@@ -1,0 +1,18 @@
+[meta]
+id          = "elasticsearch"
+name        = "Elasticsearch"
+category    = "database"
+description = "Elasticsearch 7+ JSON server logs"
+
+[detect]
+path_hints = ["**/elasticsearch*.log", "**/elasticsearch*.json", "/var/log/elasticsearch/*"]
+process_hints = ["elasticsearch", "java"]
+line_probes = [
+  "\"type\"\\s*:\\s*\"server\"",
+  "\"cluster.name\"\\s*:",
+  "\"node.name\"\\s*:",
+]
+probe_threshold = 0.3
+
+[parse]
+format = "json"

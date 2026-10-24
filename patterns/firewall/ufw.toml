@@ -1,0 +1,18 @@
+[meta]
+id          = "ufw"
+name        = "Uncomplicated Firewall (UFW)"
+category    = "firewall"
+description = "Ubuntu UFW packet log lines (kernel-prefixed, [UFW ...])"
+
+[detect]
+path_hints = ["**/ufw*.log", "**/kern.log*", "**/syslog*"]
+process_hints = ["kernel", "ufw"]
+line_probes = [
+  "\\[UFW BLOCK\\]",
+  "\\[UFW ALLOW\\]",
+  "\\[UFW AUDIT\\]",
+]
+probe_threshold = 0.3
+
+[parse]
+format = "syslog"

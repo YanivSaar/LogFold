@@ -1,0 +1,17 @@
+[meta]
+id          = "cloudflare"
+name        = "Cloudflare Logpush"
+category    = "cloud"
+description = "Cloudflare Logpush HTTP request records (NDJSON)"
+
+[detect]
+path_hints = ["**/cloudflare*.json*", "**/logpush*.json*"]
+line_probes = [
+  "\"ClientIP\"\\s*:",
+  "\"EdgeResponseStatus\"\\s*:",
+  "\"ZoneName\"\\s*:",
+]
+probe_threshold = 0.3
+
+[parse]
+format = "json"

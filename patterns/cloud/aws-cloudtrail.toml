@@ -1,0 +1,18 @@
+[meta]
+id          = "aws-cloudtrail"
+name        = "AWS CloudTrail"
+category    = "cloud"
+description = "AWS CloudTrail JSON event records (one per line when ingested from S3)"
+
+[detect]
+path_hints = ["**/cloudtrail/*.json*", "**/CloudTrail/*.json*"]
+line_probes = [
+  "\"eventSource\"\\s*:\\s*\"[a-z]+\\.amazonaws\\.com\"",
+  "\"userIdentity\"\\s*:\\s*\\{",
+  "\"eventName\"\\s*:",
+  "\"awsRegion\"\\s*:",
+]
+probe_threshold = 0.3
+
+[parse]
+format = "json"

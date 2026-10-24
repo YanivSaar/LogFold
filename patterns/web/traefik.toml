@@ -1,0 +1,18 @@
+[meta]
+id          = "traefik"
+name        = "Traefik"
+category    = "web"
+description = "Traefik JSON access and runtime logs"
+
+[detect]
+path_hints = ["**/traefik*.log", "/var/log/traefik/*"]
+process_hints = ["traefik"]
+line_probes = [
+  "\"RouterName\"\\s*:",
+  "\"ServiceName\"\\s*:",
+  "\"ClientHost\"\\s*:",
+]
+probe_threshold = 0.25
+
+[parse]
+format = "json"

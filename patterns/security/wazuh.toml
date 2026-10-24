@@ -1,0 +1,18 @@
+[meta]
+id          = "wazuh"
+name        = "Wazuh"
+category    = "security"
+description = "Wazuh manager / archives JSON alert feed"
+
+[detect]
+path_hints = ["**/wazuh/*.json*", "**/archives.json*", "/var/ossec/logs/alerts/*"]
+process_hints = ["wazuh", "ossec"]
+line_probes = [
+  "\"rule\"\\s*:\\s*\\{",
+  "\"agent\"\\s*:\\s*\\{",
+  "\"predecoder\"\\s*:",
+]
+probe_threshold = 0.3
+
+[parse]
+format = "json"

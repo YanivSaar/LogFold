@@ -1,0 +1,27 @@
+[meta]
+id          = "dovecot"
+name        = "Dovecot IMAP/POP3"
+category    = "mail"
+description = "Dovecot authentication and session logs"
+
+[detect]
+path_hints = ["**/dovecot*.log*", "**/mail.log*", "journald:dovecot"]
+process_hints = ["dovecot", "imap", "pop3"]
+line_probes = [
+  "dovecot: ",
+  "imap-login:",
+  "pop3-login:",
+  "auth-worker",
+]
+probe_threshold = 0.3
+
+[parse]
+format = "syslog"
+
+[[context_types]]
+after = "user"
+type = "USER"
+
+[[context_types]]
+after = "rip"
+type = "IP"

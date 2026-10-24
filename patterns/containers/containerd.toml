@@ -1,0 +1,19 @@
+[meta]
+id          = "containerd"
+name        = "containerd"
+category    = "containers"
+description = "containerd daemon logs (via journald containerd.service)"
+
+[detect]
+path_hints = ["journald:containerd"]
+process_hints = ["containerd", "containerd-shim-runc-v2"]
+line_probes = [
+  "containerd\\[\\d+\\]:",
+  "level=info ",
+  "msg=\"",
+  "runtime=\"",
+]
+probe_threshold = 0.3
+
+[parse]
+format = "kv"

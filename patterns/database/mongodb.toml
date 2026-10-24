@@ -1,0 +1,18 @@
+[meta]
+id          = "mongodb"
+name        = "MongoDB"
+category    = "database"
+description = "mongod 4.x+ JSON log lines"
+
+[detect]
+path_hints = ["**/mongod*.log", "/var/log/mongodb/*"]
+process_hints = ["mongod"]
+line_probes = [
+  "\"c\"\\s*:\\s*\"[A-Z]+\"",
+  "\"ctx\"\\s*:\\s*\"",
+  "\"attr\"\\s*:\\s*\\{",
+]
+probe_threshold = 0.25
+
+[parse]
+format = "json"

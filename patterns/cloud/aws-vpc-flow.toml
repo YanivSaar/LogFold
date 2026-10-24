@@ -1,0 +1,14 @@
+[meta]
+id          = "aws-vpc-flow"
+name        = "AWS VPC Flow Logs"
+category    = "cloud"
+description = "Space-delimited VPC flow log records (default v2 format)"
+
+[detect]
+path_hints = ["**/vpc-flow*.log*", "**/vpc_flow*"]
+line_probes = [
+  "^\\d+ \\d+ eni-[0-9a-f]+ ",
+  " ACCEPT OK$",
+  " REJECT OK$",
+]
+probe_threshold = 0.4

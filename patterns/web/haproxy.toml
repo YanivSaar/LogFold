@@ -1,0 +1,19 @@
+[meta]
+id          = "haproxy"
+name        = "HAProxy"
+category    = "web"
+description = "HAProxy connection and HTTP request logs"
+
+[detect]
+path_hints = ["**/haproxy*.log", "/var/log/haproxy*"]
+process_hints = ["haproxy"]
+line_probes = [
+  "haproxy\\[\\d+\\]:",
+  "frontend ",
+  "backend ",
+  "Server .+/.+ is",
+]
+probe_threshold = 0.2
+
+[parse]
+format = "syslog"

@@ -1,0 +1,19 @@
+[meta]
+id          = "wireguard"
+name        = "WireGuard"
+category    = "vpn"
+description = "WireGuard tunnel session logs (via journald wg-quick / wireguard kernel)"
+
+[detect]
+path_hints = ["journald:wg-quick@*", "journald:wireguard", "**/kern.log*"]
+process_hints = ["wg-quick", "wireguard"]
+line_probes = [
+  "wireguard: ",
+  "wg-quick",
+  "Handshake for peer",
+  "Keypair ",
+]
+probe_threshold = 0.3
+
+[parse]
+format = "syslog"

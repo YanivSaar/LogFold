@@ -1,0 +1,16 @@
+[meta]
+id          = "k8s-apiserver"
+name        = "Kubernetes API server"
+category    = "containers"
+description = "kube-apiserver klog or JSON logs"
+
+[detect]
+path_hints = ["**/kube-apiserver*.log*", "**/apiserver*.log*", "journald:kube-apiserver"]
+process_hints = ["kube-apiserver", "apiserver"]
+line_probes = [
+  "kube-apiserver",
+  "APIServerIPRange",
+  "apiserver_",
+  "\"audit.k8s.io/",
+]
+probe_threshold = 0.3

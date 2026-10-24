@@ -1,0 +1,16 @@
+[meta]
+id          = "tailscale"
+name        = "Tailscale"
+category    = "vpn"
+description = "tailscaled logs (journald unit tailscaled.service)"
+
+[detect]
+path_hints = ["journald:tailscaled"]
+process_hints = ["tailscaled", "tailscale"]
+line_probes = [
+  "tailscaled",
+  "magicsock: ",
+  "wgengine: ",
+  "LinkChange",
+]
+probe_threshold = 0.3

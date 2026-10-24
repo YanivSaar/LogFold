@@ -1,0 +1,15 @@
+[meta]
+id          = "zeek"
+name        = "Zeek (Bro)"
+category    = "security"
+description = "Zeek structured ASCII logs (http.log, conn.log, notice.log)"
+
+[detect]
+path_hints = ["**/zeek/*.log", "**/bro/*.log", "**/notice.log*", "**/http.log*", "**/conn.log*"]
+process_hints = ["zeek", "bro"]
+line_probes = [
+  "^#separator ",
+  "^#fields\\t",
+  "^\\d+\\.\\d+\\t",
+]
+probe_threshold = 0.3

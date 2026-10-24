@@ -8,7 +8,23 @@ CLI surface and bundle schema.
 
 ## [Unreleased]
 
-(nothing yet)
+### Added (v0.11 work)
+- `logfold --lint <path>` subcommand validates one or more TOML
+  bundles. Walks directories, prints `ok` / `err` per file, exits
+  non-zero when any bundle fails to parse or compile. Runs under
+  `Trust::Builtin` so the author doesn't trip over user-regex
+  size limits during local authoring.
+- `src/detect/registry.rs::lint_bundle_file()` surfaces the full
+  error chain (`{err:#}` formatting) so the lint output names the
+  offending regex, glob, or missing field.
+- Catalog grew from 27 to 50 compiled-in bundles. New entries:
+  web/caddy, web/haproxy, web/traefik, database/mongodb,
+  database/redis, database/elasticsearch, firewall/nftables,
+  firewall/ufw, vpn/wireguard, vpn/strongswan, vpn/tailscale,
+  security/suricata, security/zeek, security/wazuh,
+  cloud/aws-cloudtrail, cloud/aws-vpc-flow, cloud/cloudflare,
+  containers/containerd, containers/k8s-apiserver, dns/bind,
+  dns/unbound, mail/dovecot, system/systemd (journald).
 
 
 ## [0.10.0] - 2026-10-24

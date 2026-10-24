@@ -1,0 +1,18 @@
+[meta]
+id          = "unbound"
+name        = "Unbound"
+category    = "dns"
+description = "NLnet Labs Unbound resolver logs"
+
+[detect]
+path_hints = ["**/unbound*.log*", "journald:unbound"]
+process_hints = ["unbound"]
+line_probes = [
+  "unbound\\[\\d+:\\d+\\]",
+  "info: resolver",
+  "info: server stats",
+]
+probe_threshold = 0.3
+
+[parse]
+format = "syslog"

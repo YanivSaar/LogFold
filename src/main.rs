@@ -126,6 +126,12 @@ struct Cli {
     /// `prometheus` cargo feature.
     #[arg(long, value_name = "ADDR")]
     prom_listen: Option<String>,
+
+    /// Validate bundle TOML files instead of folding logs. The
+    /// positional arguments are treated as paths to .toml files.
+    /// Returns exit code 0 if every bundle parses and compiles.
+    #[arg(long, conflicts_with_all = ["follow", "learn", "json", "ndjson"])]
+    lint: bool,
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -143,6 +149,10 @@ async fn main() -> Result<()> {
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
         .init();
+
+    if cli.lint {
+        return run_lint(&cli.sources);
+    }
 
     let sources: Vec<SourceKind> = if cli.sources.is_empty() {
         vec![SourceKind::Stdin]
@@ -197,4 +207,66 @@ async fn main() -> Result<()> {
     };
 
     logfold::run(cfg)
+}
+
+/// Validate bundle TOML files. Prints one line per file plus a summary;
+/// exits non-zero if any bundle fails to compile.
+fn run_lint(paths: &[String]) -> Result<()> {
+    if paths.is_empty() {
+        eprintln!("logfold lint: no bundle paths given");
+        std::process::exit(2);
+    }
+    let mut errors = 0usize;
+    let mut ok = 0usize;
+    for path in paths {
+        let p = std::path::Path::new(path);
+        if p.is_dir() {
+            // Walk the directory for .toml bundles.
+            let mut stack = vec![p.to_path_buf()];
+            while let Some(dir) = stack.pop() {
+                let read = match std::fs::read_dir(&dir) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("  err  {}: {e}", dir.display());
+                        errors += 1;
+                        continue;
+                    }
+                };
+                for entry in read.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        stack.push(path);
+                    } else if path.extension().and_then(|s| s.to_str()) == Some("toml") {
+                        match logfold::detect::registry::lint_bundle_file(&path) {
+                            Ok(id) => {
+                                println!("  ok   {} ({id})", path.display());
+                                ok += 1;
+                            }
+                            Err(e) => {
+                                println!("  err  {}: {e:#}", path.display());
+                                errors += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+        match logfold::detect::registry::lint_bundle_file(p) {
+            Ok(id) => {
+                println!("  ok   {} ({id})", p.display());
+                ok += 1;
+            }
+            Err(e) => {
+                println!("  err  {}: {e:#}", p.display());
+                errors += 1;
+            }
+        }
+    }
+    println!();
+    println!("lint: {ok} ok, {errors} failed");
+    if errors > 0 {
+        std::process::exit(1);
+    }
+    Ok(())
 }

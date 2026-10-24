@@ -1,0 +1,18 @@
+[meta]
+id          = "caddy"
+name        = "Caddy web server"
+category    = "web"
+description = "Caddy 2.x JSON access and error logs"
+
+[detect]
+path_hints = ["**/caddy/*.log", "**/caddy*.log", "/var/log/caddy/*"]
+process_hints = ["caddy"]
+line_probes = [
+  "\"logger\"\\s*:\\s*\"http",
+  "\"msg\"\\s*:\\s*\"handled request\"",
+  "\"request\"\\s*:\\s*\\{",
+]
+probe_threshold = 0.3
+
+[parse]
+format = "json"

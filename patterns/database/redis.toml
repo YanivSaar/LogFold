@@ -1,0 +1,16 @@
+[meta]
+id          = "redis"
+name        = "Redis"
+category    = "database"
+description = "redis-server log lines"
+
+[detect]
+path_hints = ["**/redis*.log", "/var/log/redis/*"]
+process_hints = ["redis-server", "redis"]
+line_probes = [
+  "\\d+:[MSXC] \\d+ ",
+  "DB loaded from disk",
+  "Ready to accept connections",
+  "Replica",
+]
+probe_threshold = 0.2

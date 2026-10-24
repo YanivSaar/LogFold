@@ -1,0 +1,19 @@
+[meta]
+id          = "strongswan"
+name        = "strongSwan"
+category    = "vpn"
+description = "strongSwan IPsec charon log lines"
+
+[detect]
+path_hints = ["**/strongswan*.log", "**/charon*.log", "journald:strongswan"]
+process_hints = ["charon", "strongswan", "ipsec"]
+line_probes = [
+  "charon: ",
+  "received IKE_SA_INIT",
+  "IKE_AUTH ",
+  "CHILD_SA ",
+]
+probe_threshold = 0.3
+
+[parse]
+format = "syslog"

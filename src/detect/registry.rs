@@ -124,6 +124,32 @@ pub struct BundleRegistry {
     bundles: Vec<Bundle>,
 }
 
+/// Lint a single TOML bundle file. Returns the bundle id on success,
+/// or an error describing the first parse/compile failure. Used by
+/// `logfold --lint` (v0.11).
+///
+/// Linting runs under [`Trust::Builtin`] so the regex size limits
+/// imposed on user-supplied bundles at runtime don't flag a locally
+/// authored bundle as broken. If you want to validate under the
+/// stricter runtime limits, load the bundle via `--patterns-dir`
+/// and let the regular loader reject it.
+pub fn lint_bundle_file(path: &std::path::Path) -> Result<String> {
+    const MAX_LINT_BYTES: u64 = 8 * 1024 * 1024;
+    let md = std::fs::metadata(path).with_context(|| format!("stat {}", path.display()))?;
+    if md.len() > MAX_LINT_BYTES {
+        color_eyre::eyre::bail!("bundle exceeds the 8 MiB cap ({} bytes)", md.len());
+    }
+    let body =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let raw: RawBundle =
+        toml::from_str(&body).with_context(|| format!("parsing TOML in {}", path.display()))?;
+    let id = raw.meta.id.clone();
+    let _bundle = raw
+        .compile(Trust::Builtin)
+        .with_context(|| format!("compiling bundle at {}", path.display()))?;
+    Ok(id)
+}
+
 impl BundleRegistry {
     /// Load the compiled-in default bundles plus any `.toml` files found
     /// under `extra_dir` (recursively).

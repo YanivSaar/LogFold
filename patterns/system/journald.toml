@@ -1,0 +1,20 @@
+[meta]
+id          = "systemd"
+name        = "systemd (journald)"
+category    = "system"
+description = "Generic systemd journal lines (unit state transitions, start/stop events)"
+
+[detect]
+path_hints = ["journald:*"]
+process_hints = ["systemd", "systemd-logind", "systemd-journald"]
+line_probes = [
+  "systemd\\[\\d+\\]:",
+  "Started ",
+  "Stopped ",
+  "Deactivated successfully",
+  "Failed to start",
+]
+probe_threshold = 0.2
+
+[parse]
+format = "syslog"

@@ -1,0 +1,19 @@
+[meta]
+id          = "suricata"
+name        = "Suricata IDS"
+category    = "security"
+description = "Suricata eve.json event stream"
+
+[detect]
+path_hints = ["**/suricata/eve.json*", "**/eve.json*", "/var/log/suricata/*.json"]
+process_hints = ["suricata"]
+line_probes = [
+  "\"event_type\"\\s*:\\s*\"alert\"",
+  "\"src_ip\"\\s*:",
+  "\"flow_id\"\\s*:",
+  "\"alert\"\\s*:\\s*\\{",
+]
+probe_threshold = 0.3
+
+[parse]
+format = "json"

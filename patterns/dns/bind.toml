@@ -1,0 +1,19 @@
+[meta]
+id          = "bind"
+name        = "BIND / named"
+category    = "dns"
+description = "ISC BIND named query and security logs"
+
+[detect]
+path_hints = ["**/named*.log*", "**/bind*.log*", "**/query.log*", "journald:named"]
+process_hints = ["named", "bind9"]
+line_probes = [
+  "named\\[\\d+\\]:",
+  "query: ",
+  "client @0x",
+  "zone-notify",
+]
+probe_threshold = 0.3
+
+[parse]
+format = "syslog"
