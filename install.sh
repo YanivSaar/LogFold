@@ -53,8 +53,30 @@ detect_target() {
 }
 
 latest_version() {
-  curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-    | awk -F'"' '/"tag_name"/ { print $4; exit }'
+  # Walk /releases newest-first and HEAD-check each tag's expected
+  # tarball URL for $target. First 2xx wins. This handles empty
+  # releases (tag published without artifacts, which /releases/latest
+  # happily returns) and partial releases (artifacts for some
+  # targets but not yours) in one pass.
+  local target="$1"
+  local tags
+  tags="$(curl -fsSL \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${REPO}/releases?per_page=30" \
+          | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]+"' \
+          | awk -F'"' '{ print $4 }')"
+  [ -z "$tags" ] && return 1
+  while IFS= read -r tag; do
+    [ -z "$tag" ] && continue
+    local url="https://github.com/${REPO}/releases/download/${tag}/logfold-${tag}-${target}.tar.gz"
+    if curl -fsI "$url" >/dev/null 2>&1; then
+      echo "$tag"
+      return 0
+    fi
+  done <<EOT
+$tags
+EOT
+  return 1
 }
 
 choose_prefix() {
@@ -93,9 +115,11 @@ main() {
   local target version
   target="$(detect_target)"
   if [ -z "$VERSION" ]; then
-    version="$(latest_version)" \
-      || die "could not query latest release from GitHub"
-    [ -n "$version" ] || die "no releases published yet for $REPO"
+    version="$(latest_version "$target")" \
+      || die "could not query releases from GitHub"
+    if [ -z "$version" ]; then
+      die "no release with an uploaded $target tarball yet. Specify LOGFOLD_VERSION=vX.Y.Z to pick a specific tag."
+    fi
   else
     version="$VERSION"
   fi
