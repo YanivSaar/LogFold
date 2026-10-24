@@ -109,7 +109,7 @@ jobs:
           tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
           sha256sum "${ARCHIVE}.tar.gz" > "${ARCHIVE}.tar.gz.sha256"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: logfold-${{ matrix.target }}
           path: |
