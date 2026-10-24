@@ -20,6 +20,9 @@ line_probes = [
 ]
 probe_threshold = 0.1
 
+[parse]
+format = "syslog"
+
 [[pattern]]
 skeleton = "sudo[*]: {USER} : TTY={*} ; PWD={PATH} ; USER={USER} ; COMMAND={PATH}"
 label    = "sudo command"

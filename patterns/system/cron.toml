@@ -9,6 +9,9 @@ process_hints = ["cron", "crond", "anacron"]
 line_probes = ["CRON\\[\\d+\\]:", "\\([^)]+\\) CMD "]
 probe_threshold = 0.2
 
+[parse]
+format = "syslog"
+
 [[pattern]]
 skeleton = "CRON[*]: ({USER}) CMD ({PATH})"
 label    = "cron command"

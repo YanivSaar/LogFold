@@ -8,7 +8,23 @@ CLI surface and bundle schema.
 
 ## [Unreleased]
 
-(nothing yet)
+### Added (v0.2 work)
+- `src/parse/formats/syslog.rs`: RFC 3164 and 5424 parser. Strips the
+  envelope (`<pri>`, timestamp, hostname, `process[pid]:`) so the fold
+  hot path only sees the free-form `msg` body. 7 unit tests cover
+  classic sshd shape, single-digit day padding, optional `<pri>`,
+  5424 with and without structured data, and non-syslog fall-through.
+- `ParseFormat` enum (`Raw` default, `Syslog`). `[parse] format = "..."`
+  per bundle controls which path runs.
+- `ParseSpec` struct carries bundle_id, format, multiline through the
+  fold path so follow-mode threads don't need the `BundleRegistry`
+  on the hot path.
+- `format = "syslog"` enabled on sshd, sudo, su, pam, cron, kern,
+  syslog, postfix, iptables, fail2ban. ModSec and web bundles stay
+  on raw tokenisation.
+- `tests/syslog_tests.rs`: proves envelope stripping reduces the sshd
+  fixture's pattern count and that PID-only differences no longer
+  fork a pattern.
 
 
 ## [0.1.1] - 2026-10-24

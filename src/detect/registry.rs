@@ -52,6 +52,9 @@ pub struct Bundle {
     /// How the multiline assembler should group lines into events.
     pub multiline: MultilineMode,
 
+    /// How to normalise a line before tokenisation.
+    pub format: ParseFormat,
+
     pub seeded: Vec<SeededPattern>,
 }
 
@@ -63,6 +66,19 @@ pub enum MultilineMode {
     Heuristic,
     /// ModSec serial-format: one event per `A..Z` section group.
     ModsecSections,
+}
+
+/// Line format declared in `[parse]` section of a bundle.
+///
+/// Governs envelope stripping before tokenisation. New in v0.2.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ParseFormat {
+    /// Tokenise the whole line (default).
+    #[default]
+    Raw,
+    /// Treat the line as RFC 3164 / 5424 syslog; strip the envelope
+    /// and tokenise only the free-form message body.
+    Syslog,
 }
 
 /// A `[[pattern]]` entry — a named canonical skeleton the engine
@@ -196,6 +212,10 @@ struct RawParse {
     /// `"modsec-sections"`.
     #[serde(default)]
     multiline: Option<String>,
+    /// Line format for envelope stripping. Accepts `"raw"` (default)
+    /// or `"syslog"`.
+    #[serde(default)]
+    format: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -317,6 +337,19 @@ impl RawBundle {
             }
         };
 
+        let format = match self.parse.format.as_deref() {
+            None | Some("raw") => ParseFormat::Raw,
+            Some("syslog") => ParseFormat::Syslog,
+            Some(other) => {
+                tracing::warn!(
+                    bundle = %self.meta.id,
+                    unknown = %other,
+                    "unknown parse format; falling back to raw"
+                );
+                ParseFormat::Raw
+            }
+        };
+
         Ok(Bundle {
             id: self.meta.id.into(),
             name: self.meta.name.into(),
@@ -327,6 +360,7 @@ impl RawBundle {
             line_probes,
             probe_threshold: self.detect.probe_threshold,
             multiline,
+            format,
             seeded,
         })
     }

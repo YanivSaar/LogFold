@@ -18,6 +18,9 @@ line_probes = [
 ]
 probe_threshold = 0.2
 
+[parse]
+format = "syslog"
+
 [[pattern]]
 skeleton = "[UFW BLOCK] IN={*} OUT={*} MAC={*} SRC={IP} DST={IP} LEN={NUM} TTL={NUM} ID={NUM} PROTO={*} SPT={NUM} DPT={NUM}"
 label    = "firewall block"

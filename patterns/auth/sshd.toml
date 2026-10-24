@@ -24,6 +24,9 @@ line_probes = [
 ]
 probe_threshold = 0.15
 
+[parse]
+format = "syslog"
+
 [[pattern]]
 skeleton = "sshd[*]: Accepted password for {USER} from {IP} port {PORT} ssh2"
 label    = "SSH password login"

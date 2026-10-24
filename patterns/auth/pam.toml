@@ -13,6 +13,9 @@ line_probes = [
 ]
 probe_threshold = 0.15
 
+[parse]
+format = "syslog"
+
 [[pattern]]
 skeleton = "pam_unix({*}:session): session opened for user {USER}"
 label    = "session opened"

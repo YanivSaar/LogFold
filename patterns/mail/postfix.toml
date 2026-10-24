@@ -19,6 +19,9 @@ line_probes = [
 ]
 probe_threshold = 0.15
 
+[parse]
+format = "syslog"
+
 [[pattern]]
 skeleton = "postfix/smtp[*]: {HASH}: to=<{EMAIL}>, relay={*}, status=sent"
 label    = "mail delivered"

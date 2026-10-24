@@ -14,9 +14,10 @@ use color_eyre::eyre::{Context, Result};
 use compact_str::CompactString;
 
 use crate::detect::probe::{Detector, Verdict};
-use crate::detect::registry::{BundleRegistry, DetectConfig, MultilineMode};
+use crate::detect::registry::{BundleRegistry, DetectConfig, MultilineMode, ParseFormat};
 use crate::engine::registry::PatternRegistry;
 use crate::ingest::multiline::Assembler;
+use crate::parse::formats::syslog;
 use crate::parse::{skeleton, tokenizer, Token};
 
 /// Hard cap on a single logical line we accept from any source.
@@ -53,6 +54,34 @@ pub struct SourceReport {
     pub source: SourceKind,
     pub lines: u64,
     pub verdict: Verdict,
+}
+
+/// Parsing configuration derived from the chosen bundle.
+///
+/// Carried through the fold path so `drive_source_follow` doesn't need
+/// to re-reach into the `BundleRegistry` on every tailed line.
+#[derive(Debug, Clone)]
+pub struct ParseSpec {
+    pub bundle_id: String,
+    pub format: ParseFormat,
+    pub multiline: MultilineMode,
+}
+
+impl ParseSpec {
+    pub fn from_bundle(bundles: &BundleRegistry, bundle_id: &str) -> Self {
+        match bundles.by_id(bundle_id) {
+            Some(b) => ParseSpec {
+                bundle_id: bundle_id.to_string(),
+                format: b.format,
+                multiline: b.multiline,
+            },
+            None => ParseSpec {
+                bundle_id: bundle_id.to_string(),
+                format: ParseFormat::default(),
+                multiline: MultilineMode::default(),
+            },
+        }
+    }
 }
 
 /// Drive one source to EOF.
@@ -102,7 +131,7 @@ fn open_file_checked(p: &Path) -> Result<std::fs::File> {
 pub fn drive_source_follow(
     source: &SourceKind,
     engine: Arc<PatternRegistry>,
-    bundle_id: String,
+    spec: ParseSpec,
     shutdown: &dyn Fn() -> bool,
 ) -> Result<()> {
     let path = match source {
@@ -110,26 +139,21 @@ pub fn drive_source_follow(
         _ => color_eyre::eyre::bail!("follow mode only supports file sources"),
     };
 
-    // Follow uses the bundle's declared multiline mode too.
-    //
-    // Note: we don't have a BundleRegistry here, so we re-derive the
-    // mode from the bundle id. Only ModSec needs special treatment today.
-    let mut assembler = if bundle_id == "modsec" {
-        Assembler::modsec_sections()
-    } else {
-        Assembler::new()
+    let mut assembler = match spec.multiline {
+        MultilineMode::ModsecSections => Assembler::modsec_sections(),
+        MultilineMode::Heuristic => Assembler::new(),
     };
     crate::ingest::watcher::tail(
         &path,
         |line| {
             if let Some(ev) = assembler.push(line) {
-                fold_one(&ev, &engine, &bundle_id);
+                fold_one(&ev, &engine, &spec);
             }
         },
         shutdown,
     )?;
     if let Some(final_ev) = assembler.drain() {
-        fold_one(&final_ev, &engine, &bundle_id);
+        fold_one(&final_ev, &engine, &spec);
     }
     Ok(())
 }
@@ -155,8 +179,9 @@ fn drive(
             score: f32::INFINITY,
             candidates: vec![],
         };
+        let spec = ParseSpec::from_bundle(bundles, &verdict.bundle_id);
         let mut assembler = assembler_for(bundles, &verdict.bundle_id);
-        let lines = fold_to_eof(reader, engine, &verdict.bundle_id, &mut assembler)?;
+        let lines = fold_to_eof(reader, engine, &spec, &mut assembler)?;
         return Ok(SourceReport {
             source: source.clone(),
             lines,
@@ -170,8 +195,9 @@ fn drive(
             score: 1.5,
             candidates: vec![],
         };
+        let spec = ParseSpec::from_bundle(bundles, &verdict.bundle_id);
         let mut assembler = assembler_for(bundles, &verdict.bundle_id);
-        let lines = fold_to_eof(reader, engine, &verdict.bundle_id, &mut assembler)?;
+        let lines = fold_to_eof(reader, engine, &spec, &mut assembler)?;
         return Ok(SourceReport {
             source: source.clone(),
             lines,
@@ -202,13 +228,14 @@ fn drive(
     // Rebuild the assembler now that we know which bundle won — ModSec
     // bundles need section-delimited grouping, not the heuristic default.
     assembler = assembler_for(bundles, &verdict.bundle_id);
+    let spec = ParseSpec::from_bundle(bundles, &verdict.bundle_id);
     let pending = detector.drain_pending();
     for line in &pending {
         if let Some(ev) = assembler.push(line) {
-            fold_one(&ev, engine, &verdict.bundle_id);
+            fold_one(&ev, engine, &spec);
         }
     }
-    let post = fold_to_eof(reader, engine, &verdict.bundle_id, &mut assembler)?;
+    let post = fold_to_eof(reader, engine, &spec, &mut assembler)?;
 
     Ok(SourceReport {
         source: source.clone(),
@@ -220,7 +247,7 @@ fn drive(
 fn fold_to_eof<R: BufRead>(
     mut reader: R,
     engine: &PatternRegistry,
-    bundle_id: &str,
+    spec: &ParseSpec,
     assembler: &mut Assembler,
 ) -> Result<u64> {
     let mut buf = Vec::<u8>::with_capacity(1024);
@@ -235,12 +262,12 @@ fn fold_to_eof<R: BufRead>(
             continue;
         }
         if let Some(ev) = assembler.push(&line) {
-            fold_one(&ev, engine, bundle_id);
+            fold_one(&ev, engine, spec);
         }
         lines += 1;
     }
     if let Some(final_ev) = assembler.drain() {
-        fold_one(&final_ev, engine, bundle_id);
+        fold_one(&final_ev, engine, spec);
     }
     Ok(lines)
 }
@@ -317,14 +344,25 @@ fn assembler_for(bundles: &BundleRegistry, bundle_id: &str) -> Assembler {
     }
 }
 
-fn fold_one(line: &str, engine: &PatternRegistry, bundle_id: &str) {
+fn fold_one(line: &str, engine: &PatternRegistry, spec: &ParseSpec) {
+    // Format-aware preprocessing: strip the envelope if the bundle
+    // asked for it. Falls through to raw tokenisation on parse miss
+    // so a non-syslog line in a syslog-tagged file still gets folded.
+    let effective: &str = match spec.format {
+        ParseFormat::Syslog => match syslog::parse(line) {
+            Some(p) => p.msg,
+            None => line,
+        },
+        ParseFormat::Raw => line,
+    };
+
     let mut tokens: Vec<Token<'_>> = Vec::with_capacity(64);
-    tokenizer::classify(line, &mut tokens);
+    tokenizer::classify(effective, &mut tokens);
     if tokens.is_empty() {
         return;
     }
     let mut skel = CompactString::default();
     let mut slots = Vec::with_capacity(8);
     skeleton::build(&tokens, &mut skel, &mut slots);
-    engine.upsert(&skel, &slots, &tokens, bundle_id, Instant::now());
+    engine.upsert(&skel, &slots, &tokens, &spec.bundle_id, Instant::now());
 }

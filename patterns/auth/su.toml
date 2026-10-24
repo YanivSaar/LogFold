@@ -8,6 +8,9 @@ path_hints = ["**/auth.log*", "**/secure*", "/var/log/auth*"]
 line_probes = ["su\\[\\d+\\]:", "FAILED SU"]
 probe_threshold = 0.1
 
+[parse]
+format = "syslog"
+
 [[pattern]]
 skeleton = "su[*]: (to {USER}) {USER} on {*}"
 label    = "su success"

@@ -132,10 +132,11 @@ fn run_no_tui(
             let Some(bundle_id) = bundle_id else {
                 continue;
             };
+            let spec = source::ParseSpec::from_bundle(&bundles, &bundle_id);
             let engine = engine.clone();
             let shutdown = shutdown.clone();
             handles.push(std::thread::spawn(move || -> Result<()> {
-                source::drive_source_follow(&src, engine, bundle_id, &|| {
+                source::drive_source_follow(&src, engine, spec, &|| {
                     shutdown.load(Ordering::Relaxed)
                 })
             }));
@@ -180,8 +181,9 @@ fn run_with_tui(
             if follow {
                 #[cfg(feature = "watcher")]
                 {
+                    let spec = source::ParseSpec::from_bundle(&bundles, &bundle_id);
                     let sd = shutdown.clone();
-                    source::drive_source_follow(&src, engine.clone(), bundle_id, &move || {
+                    source::drive_source_follow(&src, engine.clone(), spec, &move || {
                         sd.load(Ordering::Relaxed)
                     })?;
                 }
