@@ -1,0 +1,5 @@
+CEF:0|Security|threatmanager|1.0|100|detected port scan|10|src=10.0.0.5 dst=10.0.0.1 proto=tcp
+CEF:0|Security|threatmanager|1.0|100|detected port scan|10|src=10.0.0.6 dst=10.0.0.1 proto=tcp
+CEF:0|Security|threatmanager|1.0|100|detected port scan|10|src=10.0.0.7 dst=10.0.0.1 proto=tcp
+CEF:0|Security|threatmanager|1.0|200|blocked outbound|7|src=10.0.0.9 dst=185.60.218.42
+CEF:0|Vendor|AV|1.1|555|malware detected: \| in filename|8|file=/tmp/x act=quarantined

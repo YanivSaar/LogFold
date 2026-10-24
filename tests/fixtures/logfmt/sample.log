@@ -1,0 +1,6 @@
+ts=2026-10-24T12:00:00Z level=info msg="request complete" service=api status=200 duration=12ms
+ts=2026-10-24T12:00:01Z level=info msg="request complete" service=api status=200 duration=15ms
+ts=2026-10-24T12:00:02Z level=info msg="request complete" service=api status=200 duration=8ms
+ts=2026-10-24T12:00:03Z level=warn msg="rate limit exceeded" service=api client=10.0.0.5
+ts=2026-10-24T12:00:04Z level=error msg="database connection timeout" service=api peer=db-primary
+ts=2026-10-24T12:00:05Z level=info msg="user signed in" service=auth user=alice

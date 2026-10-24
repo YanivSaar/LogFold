@@ -1,0 +1,4 @@
+LEEF:1.0|QRadar|QFlow|1.0|6013|src=10.0.0.5	dst=10.0.0.1	proto=tcp
+LEEF:1.0|QRadar|QFlow|1.0|6013|src=10.0.0.6	dst=10.0.0.1	proto=tcp
+LEEF:1.0|QRadar|QFlow|1.0|6013|src=10.0.0.7	dst=10.0.0.1	proto=tcp
+LEEF:2.0|QRadar|QFlow|2.0|7013|^|src=192.168.1.5^dst=10.0.0.1^evt=login_failed

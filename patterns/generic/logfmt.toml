@@ -1,0 +1,17 @@
+[meta]
+id          = "generic/logfmt"
+name        = "logfmt / key=value"
+category    = "generic"
+description = "Fallback for logfmt-style key=value lines (go-kit, Prometheus, syslog-ng KV)"
+
+[detect]
+line_probes = [
+  "level=(info|warn|error|debug|trace)",
+  "msg=\"",
+  "ts=\\d{4}-\\d{2}-\\d{2}",
+  "caller=[a-z/]",
+]
+probe_threshold = 0.4
+
+[parse]
+format = "kv"

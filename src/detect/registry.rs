@@ -75,15 +75,22 @@ pub enum MultilineMode {
 
 /// Line format declared in `[parse]` section of a bundle.
 ///
-/// Governs envelope stripping before tokenisation. New in v0.2.
+/// Governs envelope stripping before tokenisation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ParseFormat {
     /// Tokenise the whole line (default).
     #[default]
     Raw,
-    /// Treat the line as RFC 3164 / 5424 syslog; strip the envelope
-    /// and tokenise only the free-form message body.
+    /// RFC 3164 / 5424 syslog; strip envelope, tokenise `msg`.
     Syslog,
+    /// JSON object per line; tokenise the recognised message field.
+    Json,
+    /// `key=value` pairs (logfmt / syslog-ng).
+    Kv,
+    /// ArcSight CEF; tokenise the `Name` field.
+    Cef,
+    /// IBM LEEF; tokenise the `EventID` field.
+    Leef,
 }
 
 /// A `[[pattern]]` entry — a named canonical skeleton the engine
@@ -355,6 +362,10 @@ impl RawBundle {
         let format = match self.parse.format.as_deref() {
             None | Some("raw") => ParseFormat::Raw,
             Some("syslog") => ParseFormat::Syslog,
+            Some("json") => ParseFormat::Json,
+            Some("kv") | Some("logfmt") => ParseFormat::Kv,
+            Some("cef") => ParseFormat::Cef,
+            Some("leef") => ParseFormat::Leef,
             Some(other) => {
                 tracing::warn!(
                     bundle = %self.meta.id,

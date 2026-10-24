@@ -12,3 +12,6 @@ line_probes = [
   "\"(msg|message)\"\\s*:",
 ]
 probe_threshold = 0.4
+
+[parse]
+format = "json"

@@ -15,7 +15,10 @@ const HELP_LINES: &[(&str, &str)] = &[
     ("Enter / Right", "Open Detail view for the selected pattern"),
     ("Esc", "Back to Overview from Detail; quit elsewhere"),
     ("", ""),
-    ("v / s / r", "Detail sub-tabs: Variables / Score / Raw Lines"),
+    (
+        "v / s / r",
+        "Detail sub-tabs: Variables / Score / Raw Lines",
+    ),
     ("", ""),
     ("f or /", "Filter pattern list by substring"),
     ("Backspace", "Edit the filter"),

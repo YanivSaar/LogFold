@@ -1,0 +1,12 @@
+[meta]
+id          = "security/cef"
+name        = "ArcSight CEF"
+category    = "security"
+description = "ArcSight / CEF-format SIEM feeds (vendor-neutral)"
+
+[detect]
+line_probes = ["^CEF:\\d"]
+probe_threshold = 0.5
+
+[parse]
+format = "cef"

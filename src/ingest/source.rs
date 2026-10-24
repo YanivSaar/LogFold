@@ -17,7 +17,7 @@ use crate::detect::probe::{Detector, Verdict};
 use crate::detect::registry::{BundleRegistry, DetectConfig, MultilineMode, ParseFormat};
 use crate::engine::registry::PatternRegistry;
 use crate::ingest::multiline::Assembler;
-use crate::parse::formats::syslog;
+use crate::parse::formats::{cef, json, kv, leef, syslog};
 use crate::parse::skeleton::ContextRule;
 use crate::parse::{skeleton, tokenizer, Token};
 
@@ -351,13 +351,25 @@ fn assembler_for(bundles: &BundleRegistry, bundle_id: &str) -> Assembler {
 fn fold_one(line: &str, engine: &PatternRegistry, spec: &ParseSpec) {
     // Format-aware preprocessing: strip the envelope if the bundle
     // asked for it. Falls through to raw tokenisation on parse miss
-    // so a non-syslog line in a syslog-tagged file still gets folded.
+    // so a non-matching line in a format-tagged file still gets folded.
+    //
+    // JSON's msg is a Cow because stringified primitives (`"msg": 200`)
+    // need an owned backing string. We stash that owner in `_owned_msg`
+    // so the borrow below outlives the match arm.
+    let owned_json: Option<String> = match spec.format {
+        ParseFormat::Json => json::parse(line).map(|p| p.msg),
+        _ => None,
+    };
     let effective: &str = match spec.format {
+        ParseFormat::Raw => line,
         ParseFormat::Syslog => match syslog::parse(line) {
             Some(p) => p.msg,
             None => line,
         },
-        ParseFormat::Raw => line,
+        ParseFormat::Json => owned_json.as_deref().unwrap_or(line),
+        ParseFormat::Kv => kv::parse(line).map(|p| p.msg).unwrap_or(line),
+        ParseFormat::Cef => cef::parse(line).map(|p| p.name).unwrap_or(line),
+        ParseFormat::Leef => leef::parse(line).map(|p| p.event_id).unwrap_or(line),
     };
 
     let mut tokens: Vec<Token<'_>> = Vec::with_capacity(64);

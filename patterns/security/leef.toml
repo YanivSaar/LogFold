@@ -1,0 +1,12 @@
+[meta]
+id          = "security/leef"
+name        = "IBM QRadar LEEF"
+category    = "security"
+description = "QRadar LEEF 1.0 / 2.0 event lines"
+
+[detect]
+line_probes = ["^LEEF:\\d"]
+probe_threshold = 0.5
+
+[parse]
+format = "leef"

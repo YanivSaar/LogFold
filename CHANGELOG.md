@@ -8,6 +8,33 @@ CLI surface and bundle schema.
 
 ## [Unreleased]
 
+(nothing yet)
+
+
+## [0.4.0] - 2026-10-24
+
+Second scheduled release (per the "release every 3 versions" cadence
+from the roadmap). Rolls up v0.2 (parsing fundamentals), v0.3 (TUI
+maturity), and v0.4 (structured parsers).
+
+### Added (v0.4 work)
+- Structured parsers: JSON, logfmt / key=value, CEF, LEEF. Each
+  lives in `src/parse/formats/<name>.rs` and returns the fold-key
+  (`msg` / `Name` / `EventID`) plus a handful of promoted-known
+  fields. Enabled via `[parse] format = "..."` in bundle TOML.
+- Four new bundles: `generic/json` and `generic/logfmt` for the
+  common structured shapes, `security/cef` and `security/leef`
+  for SIEM feeds. The existing `generic/json` bundle gained its
+  `format = "json"` opt-in.
+- `ParseFormat::{Json, Kv, Cef, Leef}` variants. `fold_one`
+  dispatches on format and tokenises the chosen field; a parse
+  miss falls through to raw tokenisation so a stray non-JSON
+  line in a JSON-tagged file still folds.
+- CEF parser respects `\|` escapes in header fields.
+- Four new fixtures (`tests/fixtures/{json-logs,logfmt,cef,leef}/sample.log`)
+  and a `tests/structured_tests.rs` integration suite covering
+  bundle schema, format-dispatch, and end-to-end fold reduction.
+
 ### Added (v0.3 work)
 - Timeline view: now reads the real `rate_buckets` ring instead of
   placeholder bars. 24 slots of 5-minute buckets covering the last
@@ -148,6 +175,7 @@ Carried forward as audit items for v0.12:
 - No chroot or seccomp sandbox for root deployments.
 
 
-[Unreleased]: https://github.com/YanivSaar/LogFold/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/YanivSaar/LogFold/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/YanivSaar/LogFold/releases/tag/v0.4.0
 [0.1.1]: https://github.com/YanivSaar/LogFold/releases/tag/v0.1.1
 [0.1.0]: https://github.com/YanivSaar/LogFold/releases/tag/v0.1.0
