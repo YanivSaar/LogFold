@@ -27,9 +27,9 @@ use parking_lot::Mutex;
 
 use crate::detect::registry::{BundleRegistry, DetectConfig};
 use crate::engine::registry::PatternRegistry;
-use crate::ingest::source::{self, SourceKind, SourceReport};
 #[cfg(feature = "tui")]
 use crate::ingest::source::SourceProgress;
+use crate::ingest::source::{self, SourceKind, SourceReport};
 use crate::output::text::TextConfig;
 
 pub struct Config {

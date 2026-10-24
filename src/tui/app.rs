@@ -354,15 +354,10 @@ impl App {
     /// Pull fresh state from the shared registry + reports. Only
     /// rebuilds derived data when the generation or reports vector
     /// actually changed since the last refresh.
-    fn refresh(
-        &mut self,
-        registry: &PatternRegistry,
-        reports: &Mutex<Vec<SourceReport>>,
-    ) -> bool {
+    fn refresh(&mut self, registry: &PatternRegistry, reports: &Mutex<Vec<SourceReport>>) -> bool {
         let gen = registry.generation();
         let new_reports = reports.lock().clone();
-        let changed =
-            gen != self.last_generation || new_reports.len() != self.last_reports_len;
+        let changed = gen != self.last_generation || new_reports.len() != self.last_reports_len;
         if !changed {
             return false;
         }

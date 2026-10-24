@@ -77,9 +77,7 @@ pub fn run(opts: UninstallOptions) -> Result<()> {
         println!("  - userdel -r {user}");
         if !is_root_process() {
             println!();
-            println!(
-                "The service needs root. Re-run as:  sudo logfold --uninstall"
-            );
+            println!("The service needs root. Re-run as:  sudo logfold --uninstall");
             println!(
                 "(or pass --no-service to leave the service in place and only remove user-level files)"
             );

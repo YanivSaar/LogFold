@@ -423,8 +423,7 @@ fn drive(
         }
     }
     if let Some(p) = progress {
-        p.lines
-            .fetch_add(pending.len() as u64, Ordering::Relaxed);
+        p.lines.fetch_add(pending.len() as u64, Ordering::Relaxed);
     }
     let post = fold_to_eof(reader, engine, &spec, &mut assembler, shutdown, progress)?;
 

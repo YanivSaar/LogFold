@@ -37,14 +37,9 @@ const HELP_LINES: &[(&str, &str)] = &[
     ("?", "Toggle this help overlay"),
 ];
 
+#[derive(Default)]
 pub struct HelpState {
     pub scroll: usize,
-}
-
-impl Default for HelpState {
-    fn default() -> Self {
-        HelpState { scroll: 0 }
-    }
 }
 
 impl HelpState {
@@ -66,7 +61,7 @@ impl HelpState {
 pub fn render(frame: &mut Frame<'_>, area: Rect, state: &HelpState) {
     // Dynamic size: capped at 72 cols so wide terminals don't stretch
     // the overlay, but shrinks to the screen on narrow ones.
-    let w = area.width.min(72).max(40);
+    let w = area.width.clamp(40, 72);
     let max_h = area.height.saturating_sub(2);
     let content_rows = HELP_LINES.len() as u16 + 2; // + title and footer
     let h = content_rows.min(max_h).max(5);
@@ -81,9 +76,10 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &HelpState) {
         .map(|(k, d)| {
             if let Some(section) = k.strip_prefix('~') {
                 // Group heading.
-                ListItem::new(Line::from(vec![
-                    Span::styled(format!(" {section} "), theme::header_style()),
-                ]))
+                ListItem::new(Line::from(vec![Span::styled(
+                    format!(" {section} "),
+                    theme::header_style(),
+                )]))
             } else if k.is_empty() && d.is_empty() {
                 ListItem::new(Line::from(""))
             } else {

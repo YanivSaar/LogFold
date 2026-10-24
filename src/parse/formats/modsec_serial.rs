@@ -87,11 +87,12 @@ pub fn parse(event: &str) -> Option<ParsedModsecSerial> {
     let primary_rule = rule_ids.first().cloned().unwrap_or_else(|| "-".into());
     let sev_tag = severity.as_deref().unwrap_or("");
     let msg_short = msg.as_deref().map(|s| truncate(s, 80)).unwrap_or("");
-    let uri_shape = uri.as_deref().map(normalise_uri).unwrap_or_else(|| "-".into());
-    let method_s = method.as_deref().unwrap_or("-");
-    let status_s = status
-        .map(|c| c.to_string())
+    let uri_shape = uri
+        .as_deref()
+        .map(normalise_uri)
         .unwrap_or_else(|| "-".into());
+    let method_s = method.as_deref().unwrap_or("-");
+    let status_s = status.map(|c| c.to_string()).unwrap_or_else(|| "-".into());
 
     let fold_key = format!(
         "modsec {verdict} rule {rule} [{sev}]: {msg} // {method} {uri} -> {status}",
@@ -215,9 +216,7 @@ fn parse_status(section_f: &str) -> Option<u32> {
     parts.next()?.parse().ok()
 }
 
-fn parse_section_h(
-    section_h: &str,
-) -> (Verdict, Vec<String>, Option<String>, Option<String>) {
+fn parse_section_h(section_h: &str) -> (Verdict, Vec<String>, Option<String>, Option<String>) {
     static TAG_RE: OnceLock<Regex> = OnceLock::new();
     let tag_re = TAG_RE.get_or_init(|| {
         Regex::new(r#"\[(id|msg|severity|unique_id|hostname|uri)\s+"([^"]+)"\]"#)
