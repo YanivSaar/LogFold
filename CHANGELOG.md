@@ -8,6 +8,41 @@ CLI surface and bundle schema.
 
 ## [Unreleased]
 
+(nothing yet)
+
+
+## [0.10.0] - 2026-10-24
+
+Fourth scheduled release in the "release every 3 versions" cadence.
+Rolls up v0.8 (ModSec v3), v0.9 (correlation rules), v0.10
+(Prometheus, state persistence, systemd packaging).
+
+### Added (v0.10 work)
+- `--state <FILE>` persists the pattern registry to disk on clean
+  shutdown and reloads from it on start. Format: human-readable
+  JSON, atomic write (temp + rename), schema versioned. Lets a
+  `--follow` deployment survive restarts without replaying the
+  log history. `src/state/mod.rs`.
+- `PatternRegistry::restore_pattern` installs a prebuilt Pattern
+  under its stored id, used only by the state restore path.
+- `--prom-listen HOST:PORT` serves a Prometheus `/metrics`
+  endpoint behind the `prometheus` cargo feature. Exposes
+  `logfold_patterns_total`, `logfold_lines_total`,
+  `logfold_patterns_by_bundle{bundle=...}`,
+  `logfold_uptime_seconds`, and `logfold_build_info`.
+  `src/metrics/mod.rs` built on hyper 1.x.
+- `contrib/systemd/logfold.service` ships a hardened unit file
+  with every systemd sandbox knob the SECURITY.md deployment
+  recommendations call for (`NoNewPrivileges`, `ProtectSystem`,
+  `MemoryDenyWriteExecute`, cleared `CapabilityBoundingSet`,
+  etc.), plus a 512M `MemoryMax` ceiling.
+- `contrib/systemd/README.md` walks through the one-time setup:
+  dedicated service user, state directory, ACL grant, drop-in
+  override for custom `ExecStart`.
+- Without `--features prometheus`, `--prom-listen` logs a WARN
+  and keeps running (same gentle-degrade pattern as webhook and
+  compression).
+
 ### Added (v0.9 work)
 - `src/rules/`: Sigma-lite correlation rule engine. Each rule
   implements the `Rule` trait: walk the snapshot set, return the
@@ -308,7 +343,8 @@ Carried forward as audit items for v0.12:
 - No chroot or seccomp sandbox for root deployments.
 
 
-[Unreleased]: https://github.com/YanivSaar/LogFold/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/YanivSaar/LogFold/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/YanivSaar/LogFold/releases/tag/v0.10.0
 [0.7.0]: https://github.com/YanivSaar/LogFold/releases/tag/v0.7.0
 [0.4.0]: https://github.com/YanivSaar/LogFold/releases/tag/v0.4.0
 [0.1.1]: https://github.com/YanivSaar/LogFold/releases/tag/v0.1.1

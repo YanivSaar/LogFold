@@ -6,9 +6,12 @@ pub mod detect;
 pub mod engine;
 pub mod enrich;
 pub mod ingest;
+#[cfg(feature = "prometheus")]
+pub mod metrics;
 pub mod output;
 pub mod parse;
 pub mod rules;
+pub mod state;
 pub mod tui;
 pub mod types;
 
@@ -46,6 +49,10 @@ pub struct Config {
     pub webhook: Option<WebhookOptions>,
     /// Enrichment sources (IOC CSV, GeoIP mmdb). v0.7.
     pub enrichment: EnrichmentOptions,
+    /// On-disk state snapshot path. v0.10.
+    pub state_path: Option<PathBuf>,
+    /// `HOST:PORT` to serve Prometheus `/metrics` on. v0.10.
+    pub prom_listen: Option<String>,
 }
 
 /// Enrichment file paths.
@@ -91,6 +98,8 @@ impl Default for Config {
             learn: None,
             webhook: None,
             enrichment: EnrichmentOptions::default(),
+            state_path: None,
+            prom_listen: None,
         }
     }
 }
@@ -115,6 +124,39 @@ pub fn run(cfg: Config) -> Result<()> {
     let bundles = Arc::new(BundleRegistry::load(cfg.patterns_dir.as_deref())?);
     let engine = Arc::new(PatternRegistry::new(cfg.max_patterns));
     let reports: Arc<Mutex<Vec<SourceReport>>> = Arc::new(Mutex::new(Vec::new()));
+
+    // Prometheus /metrics listener. Runs on the tokio runtime for the
+    // lifetime of the process; nothing to join since it's detached.
+    #[cfg(feature = "prometheus")]
+    if let Some(addr) = cfg.prom_listen.as_deref() {
+        match addr.parse::<std::net::SocketAddr>() {
+            Ok(socket) => {
+                let eng = engine.clone();
+                tokio::spawn(async move { metrics::serve(socket, eng).await });
+            }
+            Err(e) => tracing::warn!(error = %e, "ignoring malformed --prom-listen address"),
+        }
+    }
+    #[cfg(not(feature = "prometheus"))]
+    if cfg.prom_listen.is_some() {
+        tracing::warn!("--prom-listen requires logfold to be built with --features prometheus");
+    }
+
+    // Restore state before any ingest if the user asked for it.
+    if let Some(state_path) = cfg.state_path.as_deref() {
+        match state::load(state_path, &engine) {
+            Ok(0) => {}
+            Ok(n) => {
+                if !cfg.quiet {
+                    eprintln!(
+                        "logfold: restored {n} pattern(s) from {}",
+                        state_path.display()
+                    );
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, "state load failed; starting fresh"),
+        }
+    }
 
     if cfg.no_tui {
         return run_no_tui(cfg, engine, bundles, reports);
@@ -186,6 +228,7 @@ fn run_no_tui(
 
     render_text(&cfg, &engine, &reports.lock())?;
     maybe_learn(&cfg, &engine)?;
+    maybe_save_state(&cfg, &engine);
     Ok(())
 }
 
@@ -253,6 +296,7 @@ fn run_with_tui(
         }
     }
     maybe_learn(&cfg, &engine)?;
+    maybe_save_state(&cfg, &engine);
     Ok(())
 }
 
@@ -299,6 +343,16 @@ fn render_text(cfg: &Config, engine: &PatternRegistry, reports: &[SourceReport])
         eprintln!("\nFolded {total} line(s) into {} pattern(s).", engine.len());
     }
     Ok(())
+}
+
+/// Persist the registry to `cfg.state_path` if set. Called from the
+/// run path's clean-shutdown point.
+fn maybe_save_state(cfg: &Config, engine: &PatternRegistry) {
+    if let Some(path) = cfg.state_path.as_deref() {
+        if let Err(e) = state::save(path, engine) {
+            tracing::warn!(error = %e, "state save failed");
+        }
+    }
 }
 
 fn maybe_learn(cfg: &Config, engine: &PatternRegistry) -> Result<()> {

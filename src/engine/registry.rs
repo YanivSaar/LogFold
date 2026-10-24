@@ -67,6 +67,18 @@ impl PatternRegistry {
         self.patterns.is_empty()
     }
 
+    /// Insert a prebuilt pattern under its stored id. Used by state
+    /// restore (`src/state/mod.rs`) to seed the registry from a saved
+    /// snapshot without replaying raw log lines. The fuzzy index is
+    /// not populated by restore - the first live upsert on a near-miss
+    /// variant pays that re-indexing cost.
+    pub fn restore_pattern(&self, id: u64, pattern: Arc<Pattern>) {
+        if self.patterns.len() >= self.max_patterns {
+            return;
+        }
+        self.patterns.insert(id, pattern);
+    }
+
     /// Insert-or-fold a classified line.
     ///
     /// `bundle_id` is "unknown" in P1; P2 attaches the detected bundle.

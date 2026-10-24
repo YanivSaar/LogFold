@@ -115,6 +115,17 @@ struct Cli {
     /// `geoip` cargo feature.
     #[arg(long, value_name = "FILE")]
     geoip: Option<PathBuf>,
+
+    /// Persist the pattern registry to this path. Loaded on start
+    /// (if present) and saved on clean shutdown. Lets `--follow`
+    /// sessions survive restarts without re-replaying history.
+    #[arg(long, value_name = "FILE")]
+    state: Option<PathBuf>,
+
+    /// Serve Prometheus `/metrics` on HOST:PORT. Requires the
+    /// `prometheus` cargo feature.
+    #[arg(long, value_name = "ADDR")]
+    prom_listen: Option<String>,
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -181,6 +192,8 @@ async fn main() -> Result<()> {
             iocs: cli.iocs,
             geoip: cli.geoip,
         },
+        state_path: cli.state,
+        prom_listen: cli.prom_listen,
     };
 
     logfold::run(cfg)

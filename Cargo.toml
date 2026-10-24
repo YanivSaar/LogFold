@@ -1,6 +1,6 @@
 [package]
 name         = "logfold"
-version      = "0.7.0"
+version      = "0.10.0"
 edition      = "2021"
 rust-version = "1.75"
 description  = "Zero-config log pattern folder and anomaly detector"
@@ -12,7 +12,7 @@ keywords     = ["logs", "observability", "anomaly-detection", "security", "tui"]
 categories   = ["command-line-utilities"]
 
 [dependencies]
-tokio             = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "fs", "sync", "signal", "time"] }
+tokio             = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "fs", "net", "sync", "signal", "time"] }
 ratatui           = { version = "0.27", optional = true }
 crossterm         = { version = "0.27", optional = true }
 clap              = { version = "4", features = ["derive"] }
@@ -39,6 +39,10 @@ reqwest           = { version = "0.12", default-features = false, features = ["j
 flate2            = { version = "1", optional = true }
 zstd              = { version = "0.13", optional = true }
 maxminddb         = { version = "0.24", optional = true }
+hyper             = { version = "1", features = ["server", "http1"], optional = true }
+hyper-util        = { version = "0.1", features = ["tokio"], optional = true }
+http-body-util    = { version = "0.1", optional = true }
+bytes             = { version = "1", optional = true }
 
 # v0.5 took the pragmatic path: shelling to `journalctl` rather than
 # linking libsystemd. Keeps the Linux build identical to macOS/BSD at
@@ -56,6 +60,7 @@ clipboard    = ["dep:arboard"]
 webhook      = ["dep:reqwest"]
 compression  = ["dep:flate2", "dep:zstd"]
 geoip        = ["dep:maxminddb"]
+prometheus   = ["dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:bytes"]
 
 [dev-dependencies]
 insta      = { version = "1", features = ["yaml"] }

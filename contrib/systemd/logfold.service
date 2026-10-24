@@ -1,0 +1,61 @@
+[Unit]
+Description=logfold - zero-config log pattern folder and anomaly detector
+Documentation=https://github.com/YanivSaar/LogFold
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=logfold
+Group=logfold
+
+# Default: tail auth.log and nginx access, emit NDJSON to the journal.
+# Override by dropping /etc/systemd/system/logfold.service.d/*.conf
+# with your own ExecStart.
+ExecStart=/usr/local/bin/logfold --no-tui --ndjson --follow \
+    /var/log/auth.log /var/log/nginx/access.log
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=logfold
+Restart=on-failure
+RestartSec=5s
+
+# Hardening per SECURITY.md. Strip ambient caps, forbid new privs,
+# isolate the filesystem. The service user needs read access to the
+# log files via ACLs (setfacl -m u:logfold:r /var/log/auth.log) or
+# membership in the `adm` / `systemd-journal` groups.
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+# No network capabilities needed unless --webhook or Prometheus is on.
+# Add `--features webhook` + an RestrictAddressFamilies=AF_INET AF_INET6
+# override drop-in if you enable them.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Read-only state root for the v0.10 snapshot file.
+ReadWritePaths=/var/lib/logfold
+ReadOnlyPaths=/var/log /etc/logfold
+
+# Reasonable resource ceilings. Adjust for your fleet.
+MemoryMax=512M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target
