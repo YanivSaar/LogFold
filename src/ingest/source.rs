@@ -32,6 +32,11 @@ pub const MAX_LINE_BYTES: usize = 1 << 20; // 1 MiB
 pub enum SourceKind {
     Stdin,
     File(PathBuf),
+    /// systemd journald unit. Reads via `journalctl -u <unit> -o cat`
+    /// so no C bindings are needed. v0.5+.
+    Journald {
+        unit: String,
+    },
 }
 
 impl SourceKind {
@@ -39,6 +44,7 @@ impl SourceKind {
         match self {
             SourceKind::Stdin => "stdin".to_string(),
             SourceKind::File(p) => p.display().to_string(),
+            SourceKind::Journald { unit } => format!("journald:{unit}"),
         }
     }
 
@@ -46,6 +52,22 @@ impl SourceKind {
         match self {
             SourceKind::Stdin => None,
             SourceKind::File(p) => Some(p.as_path()),
+            SourceKind::Journald { .. } => None,
+        }
+    }
+
+    /// Parse a CLI argument into a source descriptor. `-` is stdin;
+    /// `journald:<unit>` is a systemd unit; anything else is a file
+    /// path.
+    pub fn parse(arg: &str) -> Self {
+        if arg == "-" {
+            SourceKind::Stdin
+        } else if let Some(unit) = arg.strip_prefix("journald:") {
+            SourceKind::Journald {
+                unit: unit.to_string(),
+            }
+        } else {
+            SourceKind::File(PathBuf::from(arg))
         }
     }
 }
@@ -98,9 +120,129 @@ pub fn drive_source(
 ) -> Result<SourceReport> {
     let reader: Box<dyn BufRead> = match source {
         SourceKind::Stdin => Box::new(io::stdin().lock()),
-        SourceKind::File(p) => Box::new(BufReader::new(open_file_checked(p)?)),
+        SourceKind::File(p) => open_file_reader(p)?,
+        SourceKind::Journald { unit } => open_journald_reader(unit)?,
     };
     drive(reader, source, engine, bundles, detect_cfg, forced_bundle)
+}
+
+/// Open a journald unit for ingest by piping `journalctl -u <unit>
+/// -o cat --no-pager`. Returns stdout as a `BufRead` that also owns
+/// the child process so it stays alive until the reader is dropped.
+///
+/// We shell out instead of binding to libsystemd for portability: it
+/// works on any distro that ships systemd (so, almost all of them)
+/// without pulling in `sd-journal` C bindings, and we get `--since`
+/// / filtering for free. Returns a helpful error if `journalctl`
+/// isn't on `PATH`.
+fn open_journald_reader(unit: &str) -> Result<Box<dyn BufRead>> {
+    use std::process::{Command, Stdio};
+
+    if !is_safe_unit_name(unit) {
+        color_eyre::eyre::bail!(
+            "unsafe journald unit name {unit:?}: only alphanumeric, dot, dash, underscore, @ allowed"
+        );
+    }
+
+    let mut cmd = Command::new("journalctl");
+    cmd.arg("-u")
+        .arg(unit)
+        .arg("-o")
+        .arg("cat")
+        .arg("--no-pager")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+
+    let mut child = cmd.spawn().with_context(|| {
+        format!("spawning `journalctl -u {unit}`; is journalctl installed and are you a member of systemd-journal?")
+    })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| color_eyre::eyre::eyre!("journalctl stdout unavailable"))?;
+
+    Ok(Box::new(JournalctlReader {
+        inner: BufReader::new(stdout),
+        _child: child,
+    }))
+}
+
+/// BufRead wrapper that keeps the `journalctl` child alive for the
+/// duration of the ingest. Dropping the reader kills the child via
+/// `Child`'s stdlib Drop behaviour (closes stdout; journalctl exits
+/// on SIGPIPE).
+struct JournalctlReader {
+    inner: BufReader<std::process::ChildStdout>,
+    _child: std::process::Child,
+}
+
+impl std::io::Read for JournalctlReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+
+impl BufRead for JournalctlReader {
+    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+        self.inner.fill_buf()
+    }
+    fn consume(&mut self, n: usize) {
+        self.inner.consume(n)
+    }
+}
+
+impl Drop for JournalctlReader {
+    fn drop(&mut self) {
+        // Best-effort kill: journalctl may already have exited on its
+        // own at EOF, in which case this is a no-op.
+        let _ = self._child.kill();
+        let _ = self._child.wait();
+    }
+}
+
+/// Reject journald unit names that could inject shell / argv tricks
+/// (even though we don't shell; defense in depth) or path traversal.
+fn is_safe_unit_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 256
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'@' | b'\\'))
+}
+
+/// Open a file for ingest, autodetecting `.gz` and `.zst` by extension
+/// when the `compression` feature is on. Returns a boxed `BufRead` so
+/// the hot path code doesn't branch per source.
+fn open_file_reader(p: &Path) -> Result<Box<dyn BufRead>> {
+    let f = open_file_checked(p)?;
+    #[cfg(feature = "compression")]
+    {
+        if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+            match ext {
+                "gz" => {
+                    let decoder = flate2::read::MultiGzDecoder::new(f);
+                    return Ok(Box::new(BufReader::new(decoder)));
+                }
+                "zst" | "zstd" => {
+                    let decoder = zstd::stream::read::Decoder::new(f)
+                        .with_context(|| format!("opening zstd stream for {}", p.display()))?;
+                    return Ok(Box::new(BufReader::new(decoder)));
+                }
+                _ => {}
+            }
+        }
+    }
+    #[cfg(not(feature = "compression"))]
+    {
+        if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+            if matches!(ext, "gz" | "zst" | "zstd") {
+                tracing::warn!(
+                    path = %p.display(),
+                    "file has a compressed extension but logfold was built without the `compression` feature; reading as raw"
+                );
+            }
+        }
+    }
+    Ok(Box::new(BufReader::new(f)))
 }
 
 /// Open a file source, warning about symlinks and non-regular files.

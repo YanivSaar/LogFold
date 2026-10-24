@@ -8,7 +8,30 @@ CLI surface and bundle schema.
 
 ## [Unreleased]
 
-(nothing yet)
+### Added (v0.5 work)
+- Transparent decompression on file sources. `.gz` and `.zst` are
+  auto-detected by extension when the `compression` feature is on;
+  without the feature the file is read raw with a warning so a
+  misconfigured host doesn't fail silently.
+- `SourceKind::Journald { unit }` and the `journald:<unit>`
+  argument shorthand. Pipes `journalctl -u <unit> -o cat --no-pager`
+  into the fold path; the child process is owned by the reader so
+  it exits cleanly when the ingest is done.
+- Unit-name whitelist on journald sources rejects anything but
+  alphanumerics, dot, dash, underscore, @ (same shape as the
+  bundle-id whitelist).
+- `--follow` now explicitly rejects stdin AND journald sources
+  with a clear error.
+- The `journald` cargo feature is now a no-op gate; v0.5 shells to
+  `journalctl` instead of linking libsystemd for portability.
+  Bundles can still declare `path_hints = ["journald:unit"]` as a
+  routing hint.
+- `tests/compression_tests.rs` compresses the sshd fixture with
+  gzip and zstd and asserts the fold result is identical to the
+  plain-text baseline.
+- CI gains a dedicated step that runs the compression tests under
+  `--features "tui watcher compression"` and a clippy pass for the
+  all-features configuration.
 
 
 ## [0.4.0] - 2026-10-24

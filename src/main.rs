@@ -106,10 +106,7 @@ async fn main() -> Result<()> {
     } else {
         cli.sources
             .into_iter()
-            .map(|s| match s.as_str() {
-                "-" => SourceKind::Stdin,
-                _ => SourceKind::File(PathBuf::from(s)),
-            })
+            .map(|s| SourceKind::parse(&s))
             .collect()
     };
 

@@ -36,18 +36,24 @@ include_dir       = "0.7"
 num_cpus          = "1"
 arboard           = { version = "3", optional = true }
 reqwest           = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+flate2            = { version = "1", optional = true }
+zstd              = { version = "0.13", optional = true }
 
-[target.'cfg(target_os = "linux")'.dependencies]
-sd-journal        = { version = "0.1", optional = true }
+# v0.5 took the pragmatic path: shelling to `journalctl` rather than
+# linking libsystemd. Keeps the Linux build identical to macOS/BSD at
+# compile time; distro `journalctl` compatibility is wider than
+# `sd-journal` bindings. The journald feature is kept as a no-op
+# gate so bundles can still declare `path_hints = ["journald:unit"]`
+# as a routing hint.
 
 [features]
 default      = ["tui", "watcher"]
 tui          = ["dep:ratatui", "dep:crossterm"]
 watcher      = ["dep:notify"]
-journald     = ["dep:sd-journal"]
+journald     = []
 clipboard    = ["dep:arboard"]
 webhook      = ["dep:reqwest"]
-compression  = []
+compression  = ["dep:flate2", "dep:zstd"]
 
 [dev-dependencies]
 insta      = { version = "1", features = ["yaml"] }

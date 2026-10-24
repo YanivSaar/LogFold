@@ -69,8 +69,13 @@ impl Default for Config {
 }
 
 pub fn run(cfg: Config) -> Result<()> {
-    if cfg.follow && cfg.sources.iter().any(|s| matches!(s, SourceKind::Stdin)) {
-        bail!("--follow is only supported on file sources, not stdin");
+    if cfg.follow
+        && cfg
+            .sources
+            .iter()
+            .any(|s| !matches!(s, SourceKind::File(_)))
+    {
+        bail!("--follow is only supported on file sources (not stdin or journald:*)");
     }
     if (cfg.json || cfg.ndjson) && !cfg.no_tui {
         bail!("--json / --ndjson require --no-tui");
