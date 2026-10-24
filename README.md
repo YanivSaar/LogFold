@@ -90,18 +90,68 @@ Optional features:
 | `clipboard`   | copy a pattern or line to the clipboard        |
 
 
-### Pre-built binaries
+### Pre-built binaries (recommended)
 
 Static Linux and macOS binaries are published on the
 [releases page](https://github.com/YanivSaar/LogFold/releases).
+Each release includes a tarball per target and a matching
+`.sha256` checksum, plus a combined `SHA256SUMS` for the whole
+release.
+
+Pick the right target for your machine:
+
+| Platform                          | Target                           |
+|-----------------------------------|----------------------------------|
+| Linux x86_64 (recommended, static)| `x86_64-unknown-linux-musl`      |
+| Linux x86_64 (dynamic, glibc)     | `x86_64-unknown-linux-gnu`       |
+| Linux ARM64 (Pi 4+, Graviton)     | `aarch64-unknown-linux-musl`     |
+| Linux ARM64 (dynamic, glibc)      | `aarch64-unknown-linux-gnu`      |
+| macOS Apple Silicon               | `aarch64-apple-darwin`           |
+| macOS Intel                       | `x86_64-apple-darwin`            |
+
+Quick check: `uname -s -m` tells you the OS and architecture.
+
+Install (Linux or macOS, musl Linux shown):
 
 ```sh
-# Linux x86_64, as an example. Adjust the asset name to your platform.
-curl -L https://github.com/YanivSaar/LogFold/releases/latest/download/logfold-x86_64-unknown-linux-musl.tar.gz \
-  | tar xz
-sudo mv logfold /usr/local/bin/
+VERSION=v0.1.0
+TARGET=x86_64-unknown-linux-musl
+BASE="https://github.com/YanivSaar/LogFold/releases/download/${VERSION}"
+
+# Download the archive and its sha256 sidecar
+curl -LO "${BASE}/logfold-${VERSION}-${TARGET}.tar.gz"
+curl -LO "${BASE}/logfold-${VERSION}-${TARGET}.tar.gz.sha256"
+
+# Verify checksum before extracting
+sha256sum -c "logfold-${VERSION}-${TARGET}.tar.gz.sha256"
+
+# Extract and install into /usr/local/bin
+tar -xzf "logfold-${VERSION}-${TARGET}.tar.gz"
+sudo install -m 0755 "logfold-${VERSION}-${TARGET}/logfold" /usr/local/bin/
+
+# Confirm
 logfold --version
 ```
+
+One-liner (verify + install, same version pin):
+
+```sh
+VERSION=v0.1.0 TARGET=x86_64-unknown-linux-musl \
+  bash -c '
+    set -euo pipefail
+    BASE="https://github.com/YanivSaar/LogFold/releases/download/${VERSION}"
+    tmp=$(mktemp -d) && cd "$tmp"
+    curl -sSL -O "${BASE}/logfold-${VERSION}-${TARGET}.tar.gz"
+    curl -sSL -O "${BASE}/logfold-${VERSION}-${TARGET}.tar.gz.sha256"
+    sha256sum -c "logfold-${VERSION}-${TARGET}.tar.gz.sha256"
+    tar -xzf "logfold-${VERSION}-${TARGET}.tar.gz"
+    sudo install -m 0755 "logfold-${VERSION}-${TARGET}/logfold" /usr/local/bin/
+    logfold --version
+  '
+```
+
+macOS note: use `shasum -a 256 -c` instead of `sha256sum -c`, and
+pick a `-apple-darwin` target.
 
 
 ### Package managers
@@ -127,6 +177,73 @@ sooner are welcome.
 | FreeBSD                     | `pkg install logfold`                   | planned |
 | crates.io (any OS)          | `cargo install logfold`                 | v0.2    |
 | From source (any OS)        | `cargo build --release`                 | now     |
+
+
+## Uninstall
+
+### Remove the binary
+
+Depends on how you installed it.
+
+```sh
+# Installed from a release tarball (into /usr/local/bin)
+sudo rm -f /usr/local/bin/logfold
+
+# Installed via `cargo install logfold`
+cargo uninstall logfold
+
+# Installed from a source clone (binary stayed in target/release)
+rm -f /path/to/LogFold/target/release/logfold
+
+# Installed from a distro package (replace with your distro)
+sudo apt remove logfold          # Debian / Ubuntu
+sudo dnf remove logfold          # Fedora / RHEL / Rocky
+sudo pacman -R logfold           # Arch Linux
+sudo zypper remove logfold       # openSUSE
+sudo apk del logfold             # Alpine Linux
+brew uninstall logfold           # macOS Homebrew
+```
+
+### Remove configuration, patterns, and state
+
+By default logfold reads no config file and writes nothing outside
+its CLI inputs. These paths exist only if you set them up yourself
+or will be used by features landing in future versions:
+
+```sh
+# User-level patterns (if you used --patterns-dir pointing here)
+rm -rf ~/.config/logfold
+
+# System-wide patterns
+sudo rm -rf /etc/logfold
+
+# Learn-mode output (default: ./learned under the invoking cwd)
+rm -rf ./learned
+
+# State snapshot (v0.10 and later, if --state was used)
+sudo rm -rf /var/lib/logfold
+```
+
+### Remove the service user and systemd unit
+
+Only if you followed the hardened-service setup in `SECURITY.md`:
+
+```sh
+# Stop and disable the service
+sudo systemctl stop logfold.service    2>/dev/null || true
+sudo systemctl disable logfold.service 2>/dev/null || true
+
+# Remove the unit file and reload systemd
+sudo rm -f /etc/systemd/system/logfold.service
+sudo systemctl daemon-reload
+
+# Drop the dedicated user and its ACL grants
+sudo setfacl -x u:logfold /var/log/auth.log            2>/dev/null || true
+sudo setfacl -x u:logfold /var/log/nginx/access.log    2>/dev/null || true
+sudo userdel -r logfold                                2>/dev/null || true
+```
+
+After this nothing of logfold remains on the host.
 
 
 ## Quick start
