@@ -8,6 +8,16 @@ CLI surface and bundle schema.
 
 ## [Unreleased]
 
+(nothing yet)
+
+
+## [0.1.1] - 2026-10-24
+
+First distributable release. Same engine as v0.1.0 plus the
+release pipeline, the one-liner installer, and the CI gates that
+make v0.1 actually usable from a cold install. v0.1.0 remains as
+a historical tag with no release artifacts attached.
+
 ### Added
 - `.github/workflows/ci.yml` runs fmt, clippy, tests on Linux and
   macOS, MSRV check against Rust 1.75, musl build sanity check,
@@ -27,6 +37,8 @@ CLI surface and bundle schema.
   the matching release tarball, verifies SHA-256, and installs
   to `/usr/local/bin` or `$HOME/.local/bin`. Served from main
   and included in every release.
+- README gains full install matrix across distros, install
+  one-liner, uninstall paths covering every install source.
 
 ### Fixed
 - `--no-default-features` build broken by unused `AtomicBool`,
@@ -89,5 +101,6 @@ Carried forward as audit items for v0.12:
 - No chroot or seccomp sandbox for root deployments.
 
 
-[Unreleased]: https://github.com/YanivSaar/LogFold/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/YanivSaar/LogFold/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/YanivSaar/LogFold/releases/tag/v0.1.1
 [0.1.0]: https://github.com/YanivSaar/LogFold/releases/tag/v0.1.0
