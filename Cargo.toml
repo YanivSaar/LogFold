@@ -1,6 +1,6 @@
 [package]
 name         = "logfold"
-version      = "0.14.3"
+version      = "0.14.4"
 edition      = "2021"
 rust-version = "1.75"
 description  = "Zero-config log pattern folder and anomaly detector"

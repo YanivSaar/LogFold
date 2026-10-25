@@ -252,12 +252,32 @@ fn parse_section_h(section_h: &str) -> (Verdict, Vec<String>, Option<String>, Op
         }
     }
 
-    (
-        verdict,
-        rule_ids,
-        severities.into_iter().next(),
-        messages.into_iter().next(),
-    )
+    // Pick the highest severity (not the first). A ModSec event can
+    // match multiple rules at mixed severities; the first-match
+    // behaviour quietly lost the CRITICAL hit when a NOTICE rule
+    // happened to appear earlier in the section. Messages are joined
+    // with " | " so an operator reading the triage line sees every
+    // rule's rationale instead of only the first.
+    let top_severity = severities.iter().cloned().max_by_key(|s| severity_rank(s));
+    let joined_messages = if messages.is_empty() {
+        None
+    } else {
+        Some(messages.join(" | "))
+    };
+    (verdict, rule_ids, top_severity, joined_messages)
+}
+
+/// Rank ModSec severity labels so `.max_by_key` picks the strongest.
+/// Unknown labels sort below NOTICE. Case-insensitive.
+fn severity_rank(s: &str) -> u8 {
+    match s.to_ascii_uppercase().as_str() {
+        "CRITICAL" => 5,
+        "ERROR" => 4,
+        "WARNING" | "WARN" => 3,
+        "NOTICE" => 2,
+        "INFO" => 1,
+        _ => 0,
+    }
 }
 
 /// Replace query-string values and numeric path segments with

@@ -59,7 +59,12 @@ pub struct Detector<'a> {
 
     /// Bitmask of which probes have matched at least one line, per bundle.
     /// Bit `i` is set if the bundle's probe pattern index `i` matched.
-    probe_mask: Vec<u64>,
+    /// Per-bundle set of distinct probe indices that have fired. Was
+    /// a single `u64` bitmask (silently ignored any 65th-plus probe
+    /// in a bundle); now a bitset of as many `u64` words as needed
+    /// so bundles with 70+ line probes score fairly against ones
+    /// with 60.
+    probe_mask: Vec<Vec<u64>>,
     probe_counts: Vec<u32>,
 
     /// Lines seen so far during detection.
@@ -85,7 +90,7 @@ impl<'a> Detector<'a> {
         Detector {
             cfg,
             registry,
-            probe_mask: vec![0u64; n],
+            probe_mask: (0..n).map(|_| Vec::new()).collect(),
             probe_counts: vec![0u32; n],
             base_scores,
             lines_seen: 0,
@@ -119,9 +124,13 @@ impl<'a> Detector<'a> {
                 let mut hit_any = false;
                 for idx in matches.iter() {
                     hit_any = true;
-                    if idx < 64 {
-                        self.probe_mask[i] |= 1u64 << idx;
+                    let word = idx / 64;
+                    let bit = idx % 64;
+                    let mask = &mut self.probe_mask[i];
+                    if word >= mask.len() {
+                        mask.resize(word + 1, 0);
                     }
+                    mask[word] |= 1u64 << bit;
                 }
                 if hit_any {
                     self.probe_counts[i] += 1;
@@ -145,7 +154,10 @@ impl<'a> Detector<'a> {
             .enumerate()
             .map(|(i, b)| {
                 // Specificity bonus: 0.3 per distinct probe anchor matched.
-                let distinct = self.probe_mask[i].count_ones() as f32;
+                let distinct = self.probe_mask[i]
+                    .iter()
+                    .map(|w| w.count_ones())
+                    .sum::<u32>() as f32;
                 // Base signal: fraction of sampled lines where any probe hit,
                 // scaled up to a cap.
                 let ratio = self.probe_counts[i] as f32 / probe_lines;

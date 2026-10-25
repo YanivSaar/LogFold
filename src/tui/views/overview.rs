@@ -4,6 +4,8 @@ use ratatui::prelude::*;
 use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders, Cell, Row, Table, TableState};
 
+use crate::tui::views::timeline::ribbon_line;
+
 use crate::engine::pattern::PatternSnapshot;
 use crate::engine::scorer;
 use crate::enrich::{self, Enricher};
@@ -175,7 +177,7 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &OverviewState) {
     let header = ratatui::widgets::Paragraph::new(header_text).style(theme::header_style());
     frame.render_widget(header, chunks[0]);
 
-    let header_cells = [" ", "SCORE", "COUNT", "TAG", "PATTERN"]
+    let header_cells = [" ", "SCORE", "COUNT", "TAG", "RATE/2h", "PATTERN"]
         .iter()
         .map(|h| Cell::from(*h).style(theme::muted_style()));
     let header_row = Row::new(header_cells).height(1);
@@ -196,6 +198,7 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &OverviewState) {
                     Cell::from("─────").style(theme::muted_style()),
                     Cell::from("───────").style(theme::muted_style()),
                     Cell::from("──────").style(theme::muted_style()),
+                    Cell::from("──────────").style(theme::muted_style()),
                     Cell::from(" folded patterns ").style(theme::muted_style()),
                 ])
                 .height(1),
@@ -204,11 +207,17 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &OverviewState) {
         let score_style = Style::default().fg(theme::score_color(r.score));
         let badge_label = format!(" {} ", r.badge.label());
         let swatch = if r.score >= 50 { "▍" } else { " " };
+        // 10-wide inline ribbon of the last 2h of 5-min buckets. This
+        // is the single biggest triage uplift from the UX plan — a
+        // screen of "all 75 NEW" rows is unreadable without a per-row
+        // volume shape to differentiate them.
+        let ribbon = ribbon_line(&r.snap.rate_buckets, 10);
         rows.push(Row::new(vec![
             Cell::from(Span::styled(swatch, score_style)),
             Cell::from(format!("● {:>3}", r.score)).style(score_style),
             Cell::from(format!("{:>7}", fmt_count(r.snap.count))),
             Cell::from(badge_label).style(theme::badge_style(r.badge.label())),
+            Cell::from(Span::styled(ribbon, score_style)),
             Cell::from(sanitize_for_display(&r.snap.skeleton)),
         ]));
     }
@@ -220,6 +229,7 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &OverviewState) {
             Constraint::Length(7),
             Constraint::Length(9),
             Constraint::Length(8),
+            Constraint::Length(10),
             Constraint::Min(20),
         ],
     )

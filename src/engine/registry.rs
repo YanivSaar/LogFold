@@ -4,7 +4,7 @@
 //! Insert and lookup both go through [`PatternRegistry::upsert`]. A
 //! secondary index supports fuzzy fallback for near-miss variants.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -48,6 +48,12 @@ pub struct PatternRegistry {
     patterns: DashMap<u64, Arc<Pattern>, RandomState>,
     fuzzy_index: DashMap<FuzzyKey, Mutex<SmallVec<[u64; 8]>>, RandomState>,
     max_patterns: usize,
+    /// Live count of entries in `patterns`. Used to enforce
+    /// `max_patterns` without calling `DashMap::len()` while an entry
+    /// lock is held — `len()` acquires a read lock on every shard,
+    /// and the shard that owns the entry we just write-locked would
+    /// deadlock on itself.
+    pattern_count: AtomicUsize,
     /// Monotonic version bumped on every mutation. Lets observers
     /// (TUI, metrics) ask "did anything change since my last peek?"
     /// without cloning the snapshot.
@@ -61,6 +67,7 @@ impl PatternRegistry {
             patterns: DashMap::with_hasher(hasher.clone()),
             fuzzy_index: DashMap::with_hasher(hasher),
             max_patterns,
+            pattern_count: AtomicUsize::new(0),
             generation: AtomicU64::new(0),
         }
     }
@@ -91,10 +98,12 @@ impl PatternRegistry {
     /// not populated by restore - the first live upsert on a near-miss
     /// variant pays that re-indexing cost.
     pub fn restore_pattern(&self, id: u64, pattern: Arc<Pattern>) {
-        if self.patterns.len() >= self.max_patterns {
+        if self.pattern_count.load(Ordering::Relaxed) >= self.max_patterns {
             return;
         }
-        self.patterns.insert(id, pattern);
+        if self.patterns.insert(id, pattern).is_none() {
+            self.pattern_count.fetch_add(1, Ordering::Relaxed);
+        }
         self.bump_generation();
     }
 
@@ -139,11 +148,9 @@ impl PatternRegistry {
             }
         }
 
-        // No fold — create. Respect the soft cap: beyond it, we don't insert.
-        if self.patterns.len() >= self.max_patterns {
-            return UpsertOutcome::NewPattern; // dropped silently; caller may count
-        }
-
+        // No fold — create. Build the candidate; the cap check happens
+        // INSIDE the DashMap entry lock below so two concurrent inserts
+        // can't both pass the check and overshoot `max_patterns`.
         let pat = Arc::new(Pattern::new(
             hash,
             skeleton.clone(),
@@ -153,8 +160,6 @@ impl PatternRegistry {
         pat.observe(now);
         extractor::ingest(&pat, slots, tokens);
 
-        // Insert (racy: another worker may have beat us; that's fine — we'll
-        // discard our Arc and observe the one that won).
         let outcome = match self.patterns.entry(hash) {
             dashmap::mapref::entry::Entry::Occupied(occ) => {
                 let winner = occ.get().clone();
@@ -163,6 +168,19 @@ impl PatternRegistry {
                 UpsertOutcome::Hit
             }
             dashmap::mapref::entry::Entry::Vacant(vac) => {
+                // Soft cap via the atomic counter — we can't call
+                // DashMap::len() here because it read-locks every
+                // shard, and we're already holding the write lock on
+                // the shard that owns `hash`. The counter also closes
+                // the TOCTOU window: fetch_add is atomic, so two
+                // concurrent inserts that both pass the check reserve
+                // distinct slots. We roll back the increment if we
+                // bail out (not here — once we're past the check, we
+                // commit).
+                if self.pattern_count.load(Ordering::Relaxed) >= self.max_patterns {
+                    return UpsertOutcome::NewPattern;
+                }
+                self.pattern_count.fetch_add(1, Ordering::Relaxed);
                 vac.insert(pat);
                 let bucket = self
                     .fuzzy_index

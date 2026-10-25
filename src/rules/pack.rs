@@ -170,17 +170,36 @@ impl Rule for CrossSshdFailedThenAccepted {
         40
     }
     fn evaluate(&self, snaps: &[PatternSnapshot]) -> Vec<u64> {
-        let has_failed = snaps.iter().any(|s| {
-            s.bundle_id.starts_with("sshd")
-                && s.skeleton.contains("Failed password")
-                && s.count >= 10
-        });
-        if !has_failed {
+        // Require Failed and Accepted to be observed close in time:
+        // a Failed burst from last week + an Accepted today is not
+        // a brute-force success. Window = 15 minutes.
+        const WINDOW: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+        let failed: Vec<&PatternSnapshot> = snaps
+            .iter()
+            .filter(|s| {
+                s.bundle_id.starts_with("sshd")
+                    && s.skeleton.contains("Failed password")
+                    && s.count >= 10
+            })
+            .collect();
+        if failed.is_empty() {
             return Vec::new();
         }
         snaps
             .iter()
             .filter(|s| s.bundle_id.starts_with("sshd") && s.skeleton.contains("Accepted password"))
+            .filter(|accepted| {
+                failed.iter().any(|f| {
+                    let a_at = accepted.last_seen;
+                    let f_at = f.last_seen;
+                    let gap = if a_at > f_at {
+                        a_at.duration_since(f_at)
+                    } else {
+                        f_at.duration_since(a_at)
+                    };
+                    gap <= WINDOW
+                })
+            })
             .map(|s| s.id)
             .collect()
     }

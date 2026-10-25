@@ -66,6 +66,10 @@ pub struct WebhookSink {
     cfg: Arc<Config>,
     client: reqwest::Client,
     last_sent: Arc<Mutex<HashMap<u64, Instant>>>,
+    /// Bound the number of in-flight webhook POSTs. A spike that
+    /// bursts past the dedup window would otherwise spawn one tokio
+    /// task per alert and could exhaust task memory.
+    in_flight: Arc<tokio::sync::Semaphore>,
 }
 
 impl WebhookSink {
@@ -84,6 +88,7 @@ impl WebhookSink {
             cfg: Arc::new(cfg),
             client,
             last_sent: Arc::new(Mutex::new(HashMap::new())),
+            in_flight: Arc::new(tokio::sync::Semaphore::new(32)),
         })
     }
 
@@ -105,6 +110,17 @@ impl WebhookSink {
                     return;
                 }
             }
+            // Opportunistic eviction: a long --follow with thousands
+            // of distinct skeletons would otherwise climb forever,
+            // since every unique pattern id ever notified stays in
+            // the map. Drop anything older than 10× the dedup window
+            // whenever the map crosses a soft cap. Cheap: once per
+            // insert, bounded by map size.
+            const SOFT_CAP: usize = 10_000;
+            if dedup.len() >= SOFT_CAP {
+                let max_age = self.cfg.dedup.saturating_mul(10);
+                dedup.retain(|_, t| now.duration_since(*t) < max_age);
+            }
             dedup.insert(snap.id, now);
         }
         self.fire(snap.clone(), score, badge);
@@ -113,7 +129,23 @@ impl WebhookSink {
     fn fire(&self, snap: PatternSnapshot, score: u32, badge: Badge) {
         let cfg = self.cfg.clone();
         let client = self.client.clone();
+        let sem = self.in_flight.clone();
+        // Try to acquire a slot without blocking; drop + log on
+        // exhaustion so the ingest path isn't ever stalled by a
+        // slow webhook endpoint.
+        let permit = match sem.clone().try_acquire_owned() {
+            Ok(p) => p,
+            Err(_) => {
+                tracing::warn!(
+                    url = %cfg.url,
+                    badge = %badge.label(),
+                    "webhook in-flight cap reached; dropping notification"
+                );
+                return;
+            }
+        };
         tokio::spawn(async move {
+            let _permit = permit; // released on drop
             let body = render_payload(&cfg, &snap, score, badge);
             let req = client.post(&cfg.url).json(&body);
             match req.send().await {

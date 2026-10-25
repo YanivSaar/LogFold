@@ -32,7 +32,14 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, snaps: &[PatternSnapshot]) {
         return;
     }
 
+    // Partial-sort for the top-8: O(N) instead of O(N log N) per
+    // render tick. With thousands of patterns and a 10 Hz redraw the
+    // old full sort showed up as visible CPU.
     let mut sorted: Vec<&PatternSnapshot> = snaps.iter().collect();
+    if sorted.len() > 8 {
+        sorted.select_nth_unstable_by_key(7, |s| std::cmp::Reverse(s.count));
+        sorted.truncate(8);
+    }
     sorted.sort_by_key(|s| std::cmp::Reverse(s.count));
 
     // Each row is a header line + ribbon line + blank separator. Fit
@@ -71,20 +78,22 @@ fn render_entry(frame: &mut Frame<'_>, area: Rect, snap: &PatternSnapshot) {
     ])
     .split(area);
 
-    // Header line.
+    // Header line. Counts and peak are shown in FG (not score_color)
+    // because colouring a raw event count on the anomaly palette
+    // conflates "big number" with "severity" — a legitimately
+    // high-volume pattern would otherwise light up CRITICAL red.
+    // The ribbon below carries the volume colour via spike ratio.
     let skel_budget = (area.width as usize).saturating_sub(32).max(10);
     let skel = truncate_cols(&sanitize_for_display(&snap.skeleton), skel_budget);
     let header = Line::from(vec![
         Span::styled(
             format!("{:>9}", fmt_count(snap.count)),
-            Style::default()
-                .fg(theme::score_color((snap.count.min(100)) as u32))
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
         ),
         Span::raw("  peak "),
         Span::styled(
             format!("{:>6}", fmt_count(snap.peak_bucket as u64)),
-            Style::default().fg(theme::score_color(snap.peak_bucket.min(100))),
+            Style::default().fg(theme::FG),
         ),
         Span::raw("/5m  "),
         Span::styled(skel, Style::default().fg(theme::FG)),
@@ -92,8 +101,17 @@ fn render_entry(frame: &mut Frame<'_>, area: Rect, snap: &PatternSnapshot) {
     frame.render_widget(Paragraph::new(header), rows[0]);
 
     // Ribbon line: one cell per bucket, scaled across the full width.
+    // Colour by spike ratio (peak / mean) rather than raw count, so
+    // steady-state high volume stays blue (muted) and a sudden burst
+    // stands out as warning/critical. Clamped to the score palette.
+    let ratio = if snap.mean_bucket > 0.5 {
+        (snap.peak_bucket as f32 / snap.mean_bucket).min(20.0)
+    } else {
+        0.0
+    };
+    let ratio_score = (ratio * 5.0) as u32; // 1x→5, 4x→20, 10x→50, 16x→80
     let ribbon = ribbon_line(&snap.rate_buckets, rows[1].width as usize);
-    let ribbon_style = Style::default().fg(theme::score_color(snap.peak_bucket.min(100)));
+    let ribbon_style = Style::default().fg(theme::score_color(ratio_score));
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(ribbon, ribbon_style))),
         rows[1],
@@ -106,7 +124,7 @@ fn render_entry(frame: &mut Frame<'_>, area: Rect, snap: &PatternSnapshot) {
 /// near-zero ones still produces a readable gradient instead of one
 /// full-height cell and 23 empties. Each output cell averages the
 /// buckets that map to it (ring has 24, ribbon is `width`).
-fn ribbon_line(buckets: &[u32], width: usize) -> String {
+pub(crate) fn ribbon_line(buckets: &[u32], width: usize) -> String {
     if width == 0 {
         return String::new();
     }

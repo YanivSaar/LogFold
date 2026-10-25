@@ -660,16 +660,22 @@ impl Drop for TerminalGuard {
 /// closure leaves the user staring at a locked raw-mode terminal with
 /// a hidden cursor. Idempotent on repeat calls.
 fn install_panic_hook() {
+    use std::io::IsTerminal;
     use std::sync::Once;
     static HOOK: Once = Once::new();
     HOOK.call_once(|| {
         let default = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
             let mut stdout = io::stdout();
-            let _ = execute!(stdout, DisableMouseCapture);
-            let _ = execute!(stdout, LeaveAlternateScreen);
-            let _ = disable_raw_mode();
-            let _ = execute!(stdout, Show);
+            // Only emit cursor-restore sequences when stdout is a TTY.
+            // When piped (`logfold file | tee`) the downstream consumer
+            // would otherwise ingest raw escape bytes on panic.
+            if stdout.is_terminal() {
+                let _ = execute!(stdout, DisableMouseCapture);
+                let _ = execute!(stdout, LeaveAlternateScreen);
+                let _ = disable_raw_mode();
+                let _ = execute!(stdout, Show);
+            }
             default(info);
         }));
     });

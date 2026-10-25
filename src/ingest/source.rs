@@ -241,10 +241,13 @@ impl Drop for JournalctlReader {
 /// Reject journald unit names that could inject shell / argv tricks
 /// (even though we don't shell; defense in depth) or path traversal.
 fn is_safe_unit_name(s: &str) -> bool {
+    // Backslash dropped from the allowlist: no systemd-escape form
+    // uses it and letting it through would pass unexpected bytes to
+    // the journalctl subprocess argv.
     !s.is_empty()
         && s.len() <= 256
         && s.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'@' | b'\\'))
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'@'))
 }
 
 /// Open a file for ingest, autodetecting `.gz` and `.zst` by extension
@@ -520,18 +523,20 @@ pub(crate) fn read_bounded_line<R: BufRead>(
     if buf.is_empty() {
         return Ok(None);
     }
-    // If we hit the cap without a newline, discard the rest of this line.
+    // If we hit the cap without a newline, discard until the next
+    // newline. The previous "give up at MAX_LINE_BYTES * 4" left the
+    // reader positioned mid-line, so subsequent reads parsed the
+    // tail of the pathological line as fresh events. We now keep
+    // reading-and-discarding without a cap: for a bounded file this
+    // terminates at EOF, and for an unbounded stream (stdin / tail)
+    // it blocks on the next newline — which is the correct behaviour
+    // because the alternative is corrupt data.
     if truncated {
         let mut sink = Vec::<u8>::with_capacity(1024);
         loop {
             sink.clear();
             let n = reader.read_until(b'\n', &mut sink)?;
             if n == 0 || sink.last().copied() == Some(b'\n') {
-                break;
-            }
-            if sink.len() > MAX_LINE_BYTES * 4 {
-                // Give up — pathological input.
-                tracing::warn!("abandoning oversize line");
                 break;
             }
         }
