@@ -92,11 +92,12 @@ For a system-wide install:
 curl -fsSL https://raw.githubusercontent.com/YanivSaar/LogFold/main/scripts/install.sh | sudo bash
 ```
 
-Pin a specific version or install prefix:
+The default (no arguments) is always the newest tagged release. To
+pin an older version or set a non-default install prefix:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/YanivSaar/LogFold/main/scripts/install.sh \
-  | bash -s -- --version v0.14.3 --prefix /opt/logfold
+  | bash -s -- --version vX.Y.Z --prefix /opt/logfold
 ```
 
 Flags: `--version <tag>`, `--prefix <dir>`, `--target <triple>`,
@@ -123,7 +124,7 @@ Pick the target that matches your host (`uname -s -m` tells you):
 | macOS / Windows / FreeBSD          | build from source (below)     |
 
 ```sh
-VERSION=v0.14.3
+VERSION=vX.Y.Z   # pick from https://github.com/YanivSaar/LogFold/releases
 TARGET=x86_64-unknown-linux-musl
 BASE="https://github.com/YanivSaar/LogFold/releases/download/${VERSION}"
 

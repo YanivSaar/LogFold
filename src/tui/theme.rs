@@ -2,13 +2,18 @@
 
 use ratatui::style::{Color, Modifier, Style};
 
-pub const CRITICAL: Color = Color::Rgb(255, 80, 72);
-pub const WARNING: Color = Color::Rgb(230, 162, 40);
-pub const INFO: Color = Color::Rgb(88, 166, 255);
-pub const SUCCESS: Color = Color::Rgb(56, 185, 80);
-pub const MUTED: Color = Color::Rgb(130, 130, 130);
-pub const ACCENT: Color = Color::Rgb(121, 96, 221);
-pub const FG: Color = Color::Rgb(201, 209, 217);
+// Palette rebuilt for high contrast on dark terminals. The old
+// values were close to Github dark but tested poorly on terminals
+// that render RGB slightly dim — scores and badges blended into
+// the background. These are brighter, less saturated, and legible
+// even on terminals that quantise RGB to the ANSI 256 palette.
+pub const CRITICAL: Color = Color::Rgb(255, 100, 100);
+pub const WARNING: Color = Color::Rgb(255, 190, 80);
+pub const INFO: Color = Color::Rgb(130, 190, 255);
+pub const SUCCESS: Color = Color::Rgb(120, 220, 120);
+pub const MUTED: Color = Color::Rgb(170, 170, 170);
+pub const ACCENT: Color = Color::Rgb(160, 140, 255);
+pub const FG: Color = Color::Rgb(230, 235, 245);
 pub const BG: Color = Color::Rgb(13, 17, 23);
 
 pub fn score_color(score: u32) -> Color {
@@ -33,9 +38,14 @@ pub fn badge_style(label: &str) -> Style {
 }
 
 pub fn header_style() -> Style {
+    // Explicit fg + bg rather than REVERSED: terminals that interpret
+    // REVERSED as "swap current fg/bg" lose the ACCENT colour entirely
+    // and end up with whatever the terminal's default bg happens to
+    // be behind text — unreadable on themes with a transparent bg.
     Style::default()
-        .fg(ACCENT)
-        .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+        .fg(Color::Rgb(20, 20, 30))
+        .bg(ACCENT)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn body_style() -> Style {

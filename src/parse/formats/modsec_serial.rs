@@ -94,16 +94,33 @@ pub fn parse(event: &str) -> Option<ParsedModsecSerial> {
     let method_s = method.as_deref().unwrap_or("-");
     let status_s = status.map(|c| c.to_string()).unwrap_or_else(|| "-".into());
 
-    let fold_key = format!(
-        "modsec {verdict} rule {rule} [{sev}]: {msg} // {method} {uri} -> {status}",
-        verdict = verdict.label(),
-        rule = primary_rule,
-        sev = sev_tag,
-        msg = msg_short,
-        method = method_s,
-        uri = uri_shape,
-        status = status_s,
-    );
+    // Fold-key template rebuilt in v0.14.5 so empty rule / severity /
+    // message slots don't leave dangling bracket / colon / dash
+    // artefacts in the user-visible skeleton. The old template was
+    //   "modsec {v} rule {r} [{s}]: {m} // {method} {uri} -> {status}"
+    // which when r="-", s="", m="", status="-" rendered as
+    //   "modsec pass rule - []:  //  GET /x ->  -"
+    // and tokenised to
+    //   "modsec pass rule - ] // GET {PATH} - {NUM}"
+    // because `[]:` and `->` are chewed by the wrapping-punct
+    // stripper. We now suppress empty segments and use "to" instead
+    // of "->" so the skeleton reads cleanly.
+    let mut parts: Vec<String> = Vec::with_capacity(8);
+    parts.push(format!("modsec {}", verdict.label()));
+    if primary_rule != "-" {
+        parts.push(format!("rule {primary_rule}"));
+    }
+    if !sev_tag.is_empty() {
+        parts.push(format!("[{sev_tag}]"));
+    }
+    if !msg_short.is_empty() {
+        parts.push(msg_short.to_string());
+    }
+    parts.push(format!("{method_s} {uri_shape}"));
+    if status_s != "-" {
+        parts.push(format!("status {status_s}"));
+    }
+    let fold_key = parts.join(" ");
 
     Some(ParsedModsecSerial {
         fold_key,
@@ -376,7 +393,11 @@ ModSecurity: Access denied with code 403 (phase 2). Pattern match "attack" at AR
         assert_eq!(p.client_ip.as_deref(), Some("10.0.0.1"));
         assert!(p.rule_ids.is_empty());
         assert!(p.fold_key.contains("pass"));
-        assert!(p.fold_key.contains("rule -"));
+        // v0.14.5: no-rule / no-severity pass events no longer carry
+        // the dangling "rule - []:" artefact that tokenised as weird
+        // leftover punctuation in the TUI.
+        assert!(!p.fold_key.contains("rule -"));
+        assert!(!p.fold_key.contains("[]"));
         assert!(!p.fold_key.contains("abc"));
     }
 

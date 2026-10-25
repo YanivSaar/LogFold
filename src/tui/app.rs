@@ -619,17 +619,39 @@ impl TerminalGuard {
         install_panic_hook();
         enable_raw_mode().context("enabling raw mode")?;
         let mut stdout = io::stdout();
-        stdout.execute(EnterAlternateScreen)?;
+        // Guard each setup step so that if any one of them fails after
+        // raw mode is enabled, we fully restore the terminal before
+        // propagating the error. The previous code returned Err before
+        // the TerminalGuard was constructed, so Drop never ran and the
+        // user was left with no echo, no cooked input, and had to
+        // `reset`. See the user-reported crash where `terminal.clear()`
+        // hit "cursor position could not be read within normal duration"
+        // on some terminals.
+        if let Err(e) = stdout.execute(EnterAlternateScreen) {
+            let _ = disable_raw_mode();
+            return Err(e).context("entering alternate screen");
+        }
         let _ = stdout.execute(EnableMouseCapture);
         let backend = CrosstermBackend::new(stdout);
-        let mut terminal = Terminal::new(backend)?;
-        // Blank the alt screen explicitly: some terminals (notably
-        // GNU screen without altscreen on, or passthroughs) will leave
-        // the previous content visible. Ratatui's diff-based renderer
-        // would then only overwrite cells it touches, letting shell
-        // output show through transparent gaps. clear() guarantees a
-        // clean slate before the first draw.
-        terminal.clear().context("clearing terminal")?;
+        let terminal = match Terminal::new(backend) {
+            Ok(t) => t,
+            Err(e) => {
+                let mut s = io::stdout();
+                let _ = s.execute(DisableMouseCapture);
+                let _ = s.execute(LeaveAlternateScreen);
+                let _ = disable_raw_mode();
+                return Err(e).context("constructing terminal backend");
+            }
+        };
+        // Blank the alt screen opportunistically. Some terminals'
+        // `clear()` queries the cursor position and times out when
+        // the host doesn't reply (noted on certain WSL / stripped
+        // terminals). A failure here is NEVER fatal — the first
+        // frame renders a full-area background block that paints
+        // every cell anyway, so the alt-screen enter alone is
+        // sufficient visually.
+        let mut terminal = terminal;
+        let _ = terminal.clear();
         Ok(TerminalGuard {
             terminal,
             mouse_enabled: true,
@@ -639,19 +661,26 @@ impl TerminalGuard {
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
+        use std::io::Write;
+
+        // Order matters: show cursor + disable mouse while we're still
+        // in the alt screen, then leave the alt screen, then drop raw
+        // mode. On a terminal that honours the alt-screen the main
+        // screen's scrollback is restored intact — do NOT clear it,
+        // that would destroy the user's history.
         if self.mouse_enabled {
             let _ = execute!(self.terminal.backend_mut(), DisableMouseCapture);
         }
+        let _ = self.terminal.show_cursor();
         let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
         let _ = disable_raw_mode();
-        let _ = self.terminal.show_cursor();
-        let _ = execute!(io::stdout(), Show);
-        // Terminals that don't honour the alt-screen leave the cursor
-        // somewhere mid-row and the next shell prompt lands on top of
-        // leftover TUI content. A trailing newline parks the cursor
-        // at column 0 of a fresh line.
-        use std::io::Write;
-        let _ = writeln!(io::stdout());
+        let mut out = io::stdout();
+        let _ = execute!(out, Show);
+        // Trailing newline so the next shell prompt starts on a fresh
+        // line on terminals that don't fully honour alt-screen; on
+        // ones that do, it adds one blank line, which is harmless.
+        let _ = writeln!(out);
+        let _ = out.flush();
     }
 }
 

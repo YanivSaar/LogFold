@@ -4,7 +4,9 @@
 # Usage (piped from GitHub raw):
 #   curl -fsSL https://raw.githubusercontent.com/YanivSaar/LogFold/main/scripts/install.sh | bash
 #   curl -fsSL https://raw.githubusercontent.com/YanivSaar/LogFold/main/scripts/install.sh | sudo bash
-#   curl -fsSL https://raw.githubusercontent.com/YanivSaar/LogFold/main/scripts/install.sh | bash -s -- --version v0.14.3
+#   curl -fsSL https://raw.githubusercontent.com/YanivSaar/LogFold/main/scripts/install.sh | bash -s -- --version vX.Y.Z
+#
+# No arguments = install the latest release.
 #
 # Downloads the matching release tarball from GitHub, verifies its
 # sha256 against the published sidecar, and installs the binary to
@@ -80,12 +82,28 @@ fi
 BIN_DIR="$PREFIX/bin"
 
 # -- version resolution ----------------------------------------------------
+#
+# The default (no --version) is always "latest". We resolve it two
+# ways in order:
+#
+#   1) GitHub's redirect endpoint https://github.com/<repo>/releases/latest
+#      — rate-limit-free and the official pattern. Returns a 302 to a
+#      tag URL; we read the tag out of the Location header.
+#   2) The authenticated-rate-limited JSON API as a fallback.
+#
+# Previously we only tried (2), which hit anonymous API rate limits
+# (60/hr/IP) behind corp NAT and died with no latest-tag resolved.
 if [[ -z "$VERSION" ]]; then
     log "resolving latest release tag"
-    api="https://api.github.com/repos/$REPO/releases/latest"
-    tag="$(curl -fsSL "$api" 2>/dev/null | grep -oE '"tag_name"[^,]*' | head -n1 | sed 's/.*: *"//; s/".*//')"
+    redir="https://github.com/$REPO/releases/latest"
+    loc="$(curl -fsSL -o /dev/null -w '%{url_effective}' "$redir" 2>/dev/null || true)"
+    tag="${loc##*/}"
+    if [[ -z "$tag" || "$tag" = "latest" ]]; then
+        api="https://api.github.com/repos/$REPO/releases/latest"
+        tag="$(curl -fsSL "$api" 2>/dev/null | grep -oE '"tag_name"[^,]*' | head -n1 | sed 's/.*: *"//; s/".*//')"
+    fi
     if [[ -z "$tag" ]]; then
-        die "could not resolve latest release tag from $api — pass --version <tag> explicitly"
+        die "could not resolve latest release tag — pass --version <tag> explicitly"
     fi
     VERSION="$tag"
 fi
