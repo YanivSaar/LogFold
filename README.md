@@ -75,19 +75,44 @@ logfold /var/log/auth.log --learn               # export learned bundles
 
 ## Installation
 
-Two supported paths: download a signed-checksum release tarball
-and drop the binary in place, or build from source. Nothing else
-is officially packaged yet.
+### One-line install (recommended)
+
+Grabs the latest release tarball for your Linux architecture
+(x86_64 or aarch64), verifies its sha256 against the published
+sidecar, and drops the binary at `/usr/local/bin/logfold` (or
+`~/.local/bin/logfold` without sudo).
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/YanivSaar/LogFold/main/scripts/install.sh | bash
+```
+
+For a system-wide install:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/YanivSaar/LogFold/main/scripts/install.sh | sudo bash
+```
+
+Pin a specific version or install prefix:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/YanivSaar/LogFold/main/scripts/install.sh \
+  | bash -s -- --version v0.14.3 --prefix /opt/logfold
+```
+
+Flags: `--version <tag>`, `--prefix <dir>`, `--target <triple>`,
+`--no-verify` (skip sha256, discouraged). The script refuses on
+macOS and tells you to use `cargo install logfold` instead; see
+the "From source" section below for Windows / FreeBSD.
 
 
-### From a release (recommended)
+### Manual tarball install
 
-Static Linux binaries and a macOS Apple Silicon binary are
-published on the [releases page](https://github.com/YanivSaar/LogFold/releases).
+If you'd rather not pipe to bash, grab the tarball directly from
+the [releases page](https://github.com/YanivSaar/LogFold/releases).
 Each release ships one tarball per target, a `.sha256` sidecar,
 and a combined `SHA256SUMS`.
 
-Pick the target that matches your host:
+Pick the target that matches your host (`uname -s -m` tells you):
 
 | Platform                           | Target                        |
 |------------------------------------|-------------------------------|
@@ -95,16 +120,10 @@ Pick the target that matches your host:
 | Linux x86_64 (dynamic, glibc)      | `x86_64-unknown-linux-gnu`    |
 | Linux ARM64 (static, recommended)  | `aarch64-unknown-linux-musl`  |
 | Linux ARM64 (dynamic, glibc)       | `aarch64-unknown-linux-gnu`   |
-| macOS Apple Silicon                | `aarch64-apple-darwin`        |
-| macOS Intel, FreeBSD, Windows      | build from source (below)     |
-
-`uname -s -m` tells you the OS and CPU.
-
-Install (replace `VERSION` with the tag from the releases page,
-and `TARGET` with the row from the table):
+| macOS / Windows / FreeBSD          | build from source (below)     |
 
 ```sh
-VERSION=v0.12.0
+VERSION=v0.14.3
 TARGET=x86_64-unknown-linux-musl
 BASE="https://github.com/YanivSaar/LogFold/releases/download/${VERSION}"
 
@@ -117,8 +136,6 @@ sudo install -m 0755 "logfold-${VERSION}-${TARGET}/logfold" /usr/local/bin/
 
 logfold --version
 ```
-
-macOS note: use `shasum -a 256 -c` in place of `sha256sum -c`.
 
 
 ### From source

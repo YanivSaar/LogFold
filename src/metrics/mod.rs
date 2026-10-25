@@ -36,7 +36,21 @@ use crate::engine::registry::PatternRegistry;
 /// Bind to `addr` and serve `/metrics` until the process ends. Runs
 /// as a dedicated tokio task; the shared `registry` and `started_at`
 /// let scrapes read live state.
-pub async fn serve(addr: SocketAddr, registry: Arc<PatternRegistry>) {
+///
+/// `allow_non_loopback` must be true for a non-loopback bind; by
+/// default we refuse to open the port to the network so a copy-paste
+/// of `--prom-listen 0.0.0.0:9898` from docs doesn't accidentally
+/// expose attacker-shaped pattern text to anyone on-network. The CLI
+/// flips this via `--prom-listen-insecure`.
+pub async fn serve(addr: SocketAddr, registry: Arc<PatternRegistry>, allow_non_loopback: bool) {
+    if !addr.ip().is_loopback() && !allow_non_loopback {
+        tracing::error!(
+            ?addr,
+            "refusing non-loopback /metrics bind without --prom-listen-insecure"
+        );
+        return;
+    }
+
     let started_at = Instant::now();
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
@@ -62,11 +76,15 @@ pub async fn serve(addr: SocketAddr, registry: Arc<PatternRegistry>) {
                 let r = registry.clone();
                 async move { Ok::<_, Infallible>(handle(req, r, started_at)) }
             });
-            if let Err(e) = hyper::server::conn::http1::Builder::new()
-                .serve_connection(io, service)
-                .await
-            {
-                tracing::debug!(error = %e, "/metrics connection ended");
+            let builder = hyper::server::conn::http1::Builder::new();
+            // Cap connection lifetime so slowloris can't tie up tasks
+            // forever. 5s is generous for a scrape — Prometheus's own
+            // default scrape_timeout is 10s but completes in ms.
+            let serve = builder.serve_connection(io, service);
+            match tokio::time::timeout(std::time::Duration::from_secs(5), serve).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::debug!(error = %e, "/metrics connection ended"),
+                Err(_) => tracing::debug!("/metrics connection timed out"),
             }
         });
     }
@@ -77,6 +95,14 @@ fn handle(
     registry: Arc<PatternRegistry>,
     started_at: Instant,
 ) -> Response<Full<Bytes>> {
+    // Only GET is meaningful; everything else closes with 405 so a
+    // crafted POST / CONNECT doesn't tie up a connection task.
+    if req.method() != hyper::Method::GET {
+        return Response::builder()
+            .status(StatusCode::METHOD_NOT_ALLOWED)
+            .body(Full::new(Bytes::from_static(b"GET only\n")))
+            .unwrap();
+    }
     if req.uri().path() != "/metrics" {
         return Response::builder()
             .status(StatusCode::NOT_FOUND)

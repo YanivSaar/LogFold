@@ -157,8 +157,8 @@ fn render_payload(
             text: format!(
                 ":rotating_light: *[{badge}]* score {score} in bundle `{bundle}`\n`{skel}` (count {count}, peak/5m {peak})",
                 badge = badge.label(),
-                bundle = snap.bundle_id,
-                skel = snap.skeleton,
+                bundle = slack_escape(&snap.bundle_id),
+                skel = slack_escape(&snap.skeleton),
                 count = snap.count,
                 peak = snap.peak_bucket,
             ),
@@ -171,12 +171,15 @@ fn render_payload(
                 event_action: "trigger",
                 dedup_key: format!("logfold:{}", snap.id),
                 payload: PdPayloadBody {
-                    summary: format!(
+                    // PagerDuty renders `summary` as plain text in the
+                    // incident list; strip CR/LF so a crafted log line
+                    // can't break the layout.
+                    summary: strip_newlines(&format!(
                         "[{}] {} in {}",
                         badge.label(),
                         snap.skeleton,
                         snap.bundle_id,
-                    ),
+                    )),
                     source: snap.bundle_id.to_string(),
                     severity: pd_severity(badge),
                     custom_details: PdCustomDetails {
@@ -192,6 +195,32 @@ fn render_payload(
             .unwrap_or(serde_json::Value::Null)
         }
     }
+}
+
+/// Escape Slack mrkdwn metacharacters that would otherwise be
+/// interpreted by the receiver: backticks (would close our fenced
+/// code), `<` `>` `&` (angle-bracket metadata, @mentions, link syntax),
+/// and newlines (would end our text block mid-line). The payload is
+/// delivered as mrkdwn `text`, so these are the only reserved bytes.
+fn slack_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '`' => out.push('\''),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '&' => out.push_str("&amp;"),
+            '\n' | '\r' => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+fn strip_newlines(s: &str) -> String {
+    s.chars()
+        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+        .collect()
 }
 
 fn pd_severity(badge: Badge) -> &'static str {

@@ -202,8 +202,11 @@ pub fn is_root() -> bool {
 }
 
 fn create_user(user: &str) -> Result<()> {
+    validate_user(user)?;
     // useradd -r is idempotent via its own exit code semantics (9 =
     // user already exists). Treat 0 and 9 as success.
+    // The leading `--` guards against a user beginning with `-` being
+    // parsed by useradd as an option.
     let status = Command::new("useradd")
         .args([
             "-r",
@@ -212,6 +215,7 @@ fn create_user(user: &str) -> Result<()> {
             "-d",
             DEFAULT_STATE_DIR,
             "-M",
+            "--",
             user,
         ])
         .status()
@@ -243,20 +247,35 @@ fn ensure_state_dir(user: &str) -> Result<()> {
 }
 
 fn grant_acl(user: &str, path: &Path) -> Result<()> {
+    validate_user(user)?;
     if !path.exists() {
         println!("skip     {} (not present yet)", path.display());
         return Ok(());
     }
     let spec = format!("u:{user}:r");
-    run("setfacl", &["-m", &spec, &path.display().to_string()])?;
+    let path_str = path.display().to_string();
+    // The `--` separates options from positional args so a path or
+    // user starting with `-` isn't parsed as a flag by setfacl.
+    run("setfacl", &["-m", &spec, "--", &path_str])?;
     println!("acl'd    {} <- {spec}", path.display());
     Ok(())
 }
 
 fn write_unit(bin_path: &Path, user: &str, exec_args: &[String]) -> Result<()> {
+    // Reject every input that could inject arbitrary systemd directives
+    // via a newline, control char or embedded placeholder. Without this
+    // check a `--service-user "logfold\nExecStartPre=/bin/sh -c '...'"`
+    // would run arbitrary code at service start.
+    validate_user(user)?;
+    for arg in exec_args {
+        validate_unit_arg(arg)?;
+    }
+    let bin_str = bin_path.display().to_string();
+    validate_unit_arg(&bin_str)?;
+
     let joined = exec_args.join(" ");
     let body = UNIT_TEMPLATE
-        .replace("{BIN_PATH}", &bin_path.display().to_string())
+        .replace("{BIN_PATH}", &bin_str)
         .replace("{SERVICE_USER}", user)
         .replace("{EXEC_ARGS}", &joined);
     std::fs::write(UNIT_PATH, body).with_context(|| format!("writing {UNIT_PATH}"))?;
@@ -289,6 +308,59 @@ fn best_effort(prog: &str, args: &[&str]) {
     }
 }
 
+/// A systemd user name must match `[A-Za-z_][A-Za-z0-9_-]{0,30}`.
+/// Rejects shell metacharacters, newlines, `--option` lookalikes, and
+/// anything that would steer useradd/setfacl's own flag parser.
+fn validate_user(user: &str) -> Result<()> {
+    if user.is_empty() || user.len() > 31 {
+        color_eyre::eyre::bail!(
+            "invalid service user: must be 1..=31 chars (got {})",
+            user.len()
+        );
+    }
+    let bytes = user.as_bytes();
+    let first_ok = bytes[0].is_ascii_alphabetic() || bytes[0] == b'_';
+    if !first_ok {
+        color_eyre::eyre::bail!(
+            "invalid service user: must start with letter or _, got {:?}",
+            user
+        );
+    }
+    for &b in &bytes[1..] {
+        if !(b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+            color_eyre::eyre::bail!(
+                "invalid service user: contains illegal byte {:?}",
+                b as char
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Any value interpolated into the systemd unit template. Rejects
+/// control bytes (newline → inject arbitrary unit directives), null,
+/// and the three placeholder tokens so an exec arg can't collide with
+/// a template substitution and swap out the service user.
+fn validate_unit_arg(s: &str) -> Result<()> {
+    if s.len() > 4096 {
+        color_eyre::eyre::bail!("unit arg too long ({} bytes)", s.len());
+    }
+    for b in s.bytes() {
+        if b < 0x20 || b == 0x7f {
+            color_eyre::eyre::bail!(
+                "unit arg contains control byte 0x{:02x}; refusing to write service file",
+                b
+            );
+        }
+    }
+    for marker in ["{BIN_PATH}", "{SERVICE_USER}", "{EXEC_ARGS}"] {
+        if s.contains(marker) {
+            color_eyre::eyre::bail!("unit arg contains template placeholder {marker}");
+        }
+    }
+    Ok(())
+}
+
 fn confirm(prompt: &str) -> Result<bool> {
     use std::io::{self, BufRead, Write};
     let mut out = io::stdout().lock();
@@ -304,4 +376,35 @@ fn confirm(prompt: &str) -> Result<bool> {
         buf.trim().to_ascii_lowercase().as_str(),
         "y" | "yes"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_user_accepts_normal() {
+        assert!(validate_user("logfold").is_ok());
+        assert!(validate_user("_svc").is_ok());
+        assert!(validate_user("my-service_1").is_ok());
+    }
+
+    #[test]
+    fn validate_user_rejects_injection_attempts() {
+        assert!(validate_user("").is_err());
+        assert!(validate_user("1digitstart").is_err());
+        assert!(validate_user("logfold\nExecStartPre=/bin/sh").is_err());
+        assert!(validate_user("logfold ExecStartPre").is_err());
+        assert!(validate_user("--shell=/bin/bash").is_err());
+        assert!(validate_user(&"a".repeat(32)).is_err());
+    }
+
+    #[test]
+    fn validate_unit_arg_rejects_newline() {
+        assert!(validate_unit_arg("/var/log/auth.log").is_ok());
+        assert!(validate_unit_arg("--no-tui").is_ok());
+        assert!(validate_unit_arg("evil\nUser=root").is_err());
+        assert!(validate_unit_arg("has\x00null").is_err());
+        assert!(validate_unit_arg("tries {SERVICE_USER} swap").is_err());
+    }
 }

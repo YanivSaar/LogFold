@@ -10,6 +10,7 @@ use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap};
 
 use crate::engine::pattern::PatternSnapshot;
 use crate::engine::scorer::{self, ScoreBreakdown};
+use crate::tui::format::sanitize_for_display;
 use crate::tui::theme;
 
 /// Which sub-tab the Detail view is showing.
@@ -51,7 +52,7 @@ pub fn render(
     frame: &mut Frame<'_>,
     area: Rect,
     snap: Option<&PatternSnapshot>,
-    peers: &[(crate::types::TokenType, &str)],
+    peers: &[(u64, crate::types::TokenType, &str)],
     tab: Tab,
 ) {
     let Some(snap) = snap else {
@@ -87,15 +88,25 @@ pub fn render(
         .style(theme::body_style());
     frame.render_widget(p, chunks[0]);
 
-    // Sub-tab bar.
-    let bar = format!(
-        " {} Variables   {} Score Breakdown   {} Raw Lines    <- {} ",
-        Tab::Variables.key_hint(),
-        Tab::ScoreBreakdown.key_hint(),
-        Tab::RawLines.key_hint(),
-        tab.label(),
-    );
-    let bar_p = Paragraph::new(bar).style(theme::header_style());
+    // Sub-tab bar — the active tab is painted with selected_style so
+    // the user doesn't have to parse a trailing "<- Variables" hint
+    // to know where they are.
+    let entries = [Tab::Variables, Tab::ScoreBreakdown, Tab::RawLines];
+    let mut spans: Vec<Span<'_>> = Vec::with_capacity(entries.len() * 2 + 1);
+    spans.push(Span::raw(" "));
+    for (i, t) in entries.iter().enumerate() {
+        let label = format!(" {} {} ", t.key_hint(), t.label());
+        let style = if *t == tab {
+            theme::selected_style()
+        } else {
+            theme::header_style()
+        };
+        spans.push(Span::styled(label, style));
+        if i + 1 < entries.len() {
+            spans.push(Span::styled("  ", theme::header_style()));
+        }
+    }
+    let bar_p = Paragraph::new(Line::from(spans)).style(theme::header_style());
     frame.render_widget(bar_p, chunks[1]);
 
     match tab {
@@ -206,7 +217,7 @@ fn render_score(
     frame: &mut Frame<'_>,
     area: Rect,
     snap: &PatternSnapshot,
-    peers: &[(crate::types::TokenType, &str)],
+    peers: &[(u64, crate::types::TokenType, &str)],
 ) {
     let b: ScoreBreakdown = scorer::compute_score_components(snap, peers);
     let total = b.total();
@@ -300,17 +311,13 @@ fn render_raw_lines(frame: &mut Frame<'_>, area: Rect, snap: &PatternSnapshot) {
     let lines = synthesise_examples(snap, 5);
 
     let body = if lines.is_empty() {
-        "No example variables captured yet. Raw-line retention lands with v0.6 webhook work."
-            .to_string()
+        "No example variables captured yet.".to_string()
     } else {
         let mut s = String::new();
-        s.push_str("Representative example lines synthesised from top-K variable values:\n\n");
+        s.push_str("Representative example lines, synthesised from Top-K variable values:\n\n");
         for (i, line) in lines.iter().enumerate() {
-            s.push_str(&format!("  {}. {}\n", i + 1, line));
+            s.push_str(&format!("  {}. {}\n", i + 1, sanitize_for_display(line)));
         }
-        s.push_str(
-            "\n(Full raw-line retention is a v0.6 feature; v0.3 reconstructs from the TopK heap.)",
-        );
         s
     };
 

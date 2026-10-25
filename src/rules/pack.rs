@@ -121,14 +121,37 @@ impl Rule for NginxErrorFlood {
                     || s.bundle_id.starts_with("apache")
                     || s.bundle_id.starts_with("web/")
                     || s.bundle_id.contains("access");
-                let looks_erroneous = s.skeleton.contains(" 4")
-                    || s.skeleton.contains(" 5")
-                    || s.skeleton.contains("{NUM}"); // generic hit; most access logs have status NUM
-                is_web && looks_erroneous && s.count >= 100
+                if !is_web || s.count < 100 {
+                    return false;
+                }
+                // Only fire when a NUM slot adjacent to `HTTP/{something}`
+                // observed an actual 4xx or 5xx response code in top-K.
+                // The old heuristic hit on " 4" / " 5" / any "{NUM}" in
+                // the skeleton, which lit up every access-log pattern.
+                looks_like_error_response(s)
             })
             .map(|s| s.id)
             .collect()
     }
+}
+
+/// Does this snapshot show evidence of 4xx/5xx responses? We walk the
+/// variable top-K of any Num slot and look for a value in 400..=599.
+/// This is strictly more honest than substring-matching the skeleton.
+fn looks_like_error_response(s: &PatternSnapshot) -> bool {
+    for v in &s.vars {
+        if !matches!(v.ty, crate::types::TokenType::Num) {
+            continue;
+        }
+        for (val, _) in &v.top {
+            if let Ok(n) = val.parse::<u32>() {
+                if (400..=599).contains(&n) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Cross-pattern: a snapshot set that has BOTH an sshd Failed-password

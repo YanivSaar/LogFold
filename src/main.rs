@@ -123,9 +123,17 @@ struct Cli {
     state: Option<PathBuf>,
 
     /// Serve Prometheus `/metrics` on HOST:PORT. Requires the
-    /// `prometheus` cargo feature.
+    /// `prometheus` cargo feature. By default only loopback addresses
+    /// are accepted; pass `--prom-listen-insecure` to open a
+    /// non-loopback port on purpose.
     #[arg(long, value_name = "ADDR")]
     prom_listen: Option<String>,
+
+    /// Allow `--prom-listen` to bind a non-loopback address. Off by
+    /// default so a copy-pasted `0.0.0.0:…` can't accidentally expose
+    /// attacker-shaped pattern text on the network.
+    #[arg(long, requires = "prom_listen")]
+    prom_listen_insecure: bool,
 
     /// Validate bundle TOML files instead of folding logs. The
     /// positional arguments are treated as paths to .toml files.
@@ -284,6 +292,7 @@ async fn main() -> Result<()> {
         },
         state_path: cli.state,
         prom_listen: cli.prom_listen,
+        prom_listen_insecure: cli.prom_listen_insecure,
     };
 
     logfold::run(cfg)

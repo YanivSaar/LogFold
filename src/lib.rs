@@ -57,6 +57,10 @@ pub struct Config {
     pub state_path: Option<PathBuf>,
     /// `HOST:PORT` to serve Prometheus `/metrics` on. v0.10.
     pub prom_listen: Option<String>,
+    /// Opt-in override to allow a non-loopback `--prom-listen` bind.
+    /// Default `false` so a copy-pasted `0.0.0.0:…` can't accidentally
+    /// expose attacker-shaped pattern text on the network.
+    pub prom_listen_insecure: bool,
 }
 
 /// Enrichment file paths.
@@ -104,6 +108,7 @@ impl Default for Config {
             enrichment: EnrichmentOptions::default(),
             state_path: None,
             prom_listen: None,
+            prom_listen_insecure: false,
         }
     }
 }
@@ -136,7 +141,8 @@ pub fn run(cfg: Config) -> Result<()> {
         match addr.parse::<std::net::SocketAddr>() {
             Ok(socket) => {
                 let eng = engine.clone();
-                tokio::spawn(async move { metrics::serve(socket, eng).await });
+                let insecure = cfg.prom_listen_insecure;
+                tokio::spawn(async move { metrics::serve(socket, eng, insecure).await });
             }
             Err(e) => tracing::warn!(error = %e, "ignoring malformed --prom-listen address"),
         }

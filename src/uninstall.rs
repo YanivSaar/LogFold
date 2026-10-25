@@ -190,7 +190,15 @@ fn collect_targets(self_path: &Path, extra_state: Option<&Path>) -> Vec<Target> 
 
     out.push(mk(PathBuf::from("/etc/logfold"), "system patterns dir"));
     out.push(mk(PathBuf::from("/var/lib/logfold"), "default state dir"));
-    out.push(mk(PathBuf::from("./learned"), "learn-mode output"));
+    // `./learned` is CWD-relative and only exists when the user ran
+    // `--learn` from this directory. Canonicalise so the confirmation
+    // prompt shows the absolute path the uninstall will actually touch,
+    // and so is_safe_target can reject a symlink pointing elsewhere.
+    if let Ok(abs) = std::fs::canonicalize("./learned") {
+        out.push(mk(abs, "learn-mode output"));
+    } else {
+        out.push(mk(PathBuf::from("./learned"), "learn-mode output"));
+    }
 
     if let Some(extra) = extra_state {
         // Don't double-list if the user passed the default path.
@@ -211,8 +219,60 @@ fn mk(path: PathBuf, label: &'static str) -> Target {
     }
 }
 
+/// Allowlist of path prefixes we're willing to recursively delete.
+/// Anything else — a symlinked `/etc/logfold -> /`, a hostile
+/// `./learned -> /home/user` — is refused with a visible warning.
+fn is_safe_target(path: &Path) -> bool {
+    // Running binary (resolved via current_exe) is trusted.
+    if let Ok(me) = std::env::current_exe() {
+        if path == me.as_path() {
+            return true;
+        }
+    }
+    // Canonicalise if we can — follows symlinks so the check runs on
+    // the actual destination, not the link. If canonicalise fails
+    // (path missing, permission denied), fall back to the raw path:
+    // remove_dir_all on a missing path will error cleanly anyway.
+    let canon = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    const SAFE_PREFIXES: &[&str] = &["/etc/logfold", "/var/lib/logfold"];
+    for p in SAFE_PREFIXES {
+        if canon.starts_with(p) {
+            return true;
+        }
+    }
+    // User-config and learn-output must live under the user's home.
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        if canon.starts_with(&home) {
+            return true;
+        }
+    }
+    // Allow a learn-output directly under the current working dir.
+    if let Ok(cwd) = std::env::current_dir() {
+        if canon.starts_with(cwd.join("learned")) || canon == cwd.join("learned") {
+            return true;
+        }
+    }
+    false
+}
+
 fn remove_target(path: &Path) -> Result<()> {
     let md = std::fs::symlink_metadata(path).with_context(|| format!("stat {}", path.display()))?;
+    // Refuse to follow symlinks on uninstall. A symlinked /etc/logfold
+    // -> / would otherwise send remove_dir_all into the filesystem
+    // root as root.
+    if md.file_type().is_symlink() {
+        color_eyre::eyre::bail!(
+            "refusing to follow symlink {} — remove it manually if intentional",
+            path.display()
+        );
+    }
+    if !is_safe_target(path) {
+        color_eyre::eyre::bail!(
+            "refusing to remove {} — not under a known-safe root",
+            path.display()
+        );
+    }
     if md.file_type().is_dir() {
         std::fs::remove_dir_all(path).with_context(|| format!("remove_dir_all {}", path.display()))
     } else {
@@ -256,5 +316,18 @@ mod tests {
         let targets = collect_targets(Path::new("/tmp/fake-logfold"), None);
         assert!(targets.iter().any(|t| t.label == "binary"));
         assert!(targets.iter().any(|t| t.label == "system patterns dir"));
+    }
+
+    #[test]
+    fn safe_target_allows_known_roots_refuses_strangers() {
+        assert!(is_safe_target(Path::new("/etc/logfold")));
+        assert!(is_safe_target(Path::new("/etc/logfold/sub")));
+        assert!(is_safe_target(Path::new("/var/lib/logfold")));
+        // These must be refused — a hostile symlink pointing here
+        // would otherwise send uninstall into the filesystem root.
+        assert!(!is_safe_target(Path::new("/")));
+        assert!(!is_safe_target(Path::new("/etc")));
+        assert!(!is_safe_target(Path::new("/var")));
+        assert!(!is_safe_target(Path::new("/boot")));
     }
 }

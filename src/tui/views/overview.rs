@@ -1,6 +1,7 @@
 //! Overview view: anomalies on top, folded patterns below.
 
 use ratatui::prelude::*;
+use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders, Cell, Row, Table, TableState};
 
 use crate::engine::pattern::PatternSnapshot;
@@ -46,7 +47,7 @@ impl OverviewState {
     /// — the biggest TUI hot-path win.
     pub fn build_filtered<'a>(
         snaps: &'a [PatternSnapshot],
-        peers: &[(TokenType, &'a str)],
+        peers: &[(u64, TokenType, &'a str)],
         min_fold: u64,
         anomaly_threshold: u32,
         filter: Option<&str>,
@@ -153,6 +154,10 @@ impl OverviewState {
     pub fn selected_row(&self) -> Option<&ScoredRow> {
         self.rows.get(self.selected)
     }
+
+    pub fn anomaly_count(&self) -> usize {
+        self.anomaly_count
+    }
 }
 
 pub fn render(frame: &mut Frame<'_>, area: Rect, state: &OverviewState) {
@@ -170,29 +175,48 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &OverviewState) {
     let header = ratatui::widgets::Paragraph::new(header_text).style(theme::header_style());
     frame.render_widget(header, chunks[0]);
 
-    let header_cells = ["SCORE", "COUNT", "TAG", "PATTERN"]
+    let header_cells = [" ", "SCORE", "COUNT", "TAG", "PATTERN"]
         .iter()
         .map(|h| Cell::from(*h).style(theme::muted_style()));
     let header_row = Row::new(header_cells).height(1);
 
-    let rows: Vec<Row<'_>> = state
-        .rows
-        .iter()
-        .map(|r| {
-            let score_style = Style::default().fg(theme::score_color(r.score));
-            let badge_label = format!(" {} ", r.badge.label());
-            Row::new(vec![
-                Cell::from(format!("● {:>3}", r.score)).style(score_style),
-                Cell::from(format!("{:>7}", fmt_count(r.snap.count))),
-                Cell::from(badge_label).style(theme::badge_style(r.badge.label())),
-                Cell::from(sanitize_for_display(&r.snap.skeleton)),
-            ])
-        })
-        .collect();
+    // Build rows with a left-edge severity swatch and a mid-list
+    // separator between the anomaly group and the folded group so the
+    // partition is readable without consulting the header count.
+    let mut rows: Vec<Row<'_>> = Vec::with_capacity(state.rows.len() + 1);
+    for (i, r) in state.rows.iter().enumerate() {
+        if i == state.anomaly_count
+            && state.anomaly_count > 0
+            && state.anomaly_count < state.rows.len()
+        {
+            // Separator row — all cells muted, visible as a dim band.
+            rows.push(
+                Row::new(vec![
+                    Cell::from("─"),
+                    Cell::from("─────").style(theme::muted_style()),
+                    Cell::from("───────").style(theme::muted_style()),
+                    Cell::from("──────").style(theme::muted_style()),
+                    Cell::from(" folded patterns ").style(theme::muted_style()),
+                ])
+                .height(1),
+            );
+        }
+        let score_style = Style::default().fg(theme::score_color(r.score));
+        let badge_label = format!(" {} ", r.badge.label());
+        let swatch = if r.score >= 50 { "▍" } else { " " };
+        rows.push(Row::new(vec![
+            Cell::from(Span::styled(swatch, score_style)),
+            Cell::from(format!("● {:>3}", r.score)).style(score_style),
+            Cell::from(format!("{:>7}", fmt_count(r.snap.count))),
+            Cell::from(badge_label).style(theme::badge_style(r.badge.label())),
+            Cell::from(sanitize_for_display(&r.snap.skeleton)),
+        ]));
+    }
 
     let table = Table::new(
         rows,
         [
+            Constraint::Length(1),
             Constraint::Length(7),
             Constraint::Length(9),
             Constraint::Length(8),
@@ -203,7 +227,18 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &OverviewState) {
     .block(Block::default().borders(Borders::ALL).title(" patterns "))
     .row_highlight_style(theme::selected_style());
 
+    // The separator row shifted the index of real rows past it by one;
+    // compensate so arrow-key navigation still lines up with the user's
+    // visual selection.
+    let display_selected = if state.selected >= state.anomaly_count
+        && state.anomaly_count > 0
+        && state.anomaly_count < state.rows.len()
+    {
+        state.selected + 1
+    } else {
+        state.selected
+    };
     let mut ts = TableState::default();
-    ts.select(Some(state.selected));
+    ts.select(Some(display_selected));
     frame.render_stateful_widget(table, chunks[1], &mut ts);
 }

@@ -128,6 +128,15 @@ pub fn save(path: &Path, registry: &PatternRegistry) -> Result<()> {
         let mut w = BufWriter::new(f);
         serde_json::to_writer(&mut w, &file)
             .with_context(|| format!("serialising state to {}", tmp.display()))?;
+        // fsync before rename: BufWriter::drop flushes to the OS but
+        // doesn't flush to disk. Power loss between rename and the OS
+        // page-cache flush would otherwise truncate the state file.
+        let inner = w
+            .into_inner()
+            .with_context(|| format!("flushing state to {}", tmp.display()))?;
+        inner
+            .sync_all()
+            .with_context(|| format!("fsync {}", tmp.display()))?;
     }
     std::fs::rename(&tmp, path)
         .with_context(|| format!("renaming {} -> {}", tmp.display(), path.display()))?;
@@ -174,8 +183,16 @@ pub fn load(path: &Path, registry: &PatternRegistry) -> Result<usize> {
     for p in file.patterns {
         let first_delta_ms = now_unix_ms.saturating_sub(p.first_seen_unix_ms) as u64;
         let last_delta_ms = now_unix_ms.saturating_sub(p.last_seen_unix_ms) as u64;
-        let first_seen = now - std::time::Duration::from_millis(first_delta_ms);
-        let last_seen = now - std::time::Duration::from_millis(last_delta_ms);
+        // checked_sub: a stale or forward-dated state file (clock skew,
+        // zero timestamp, deserialisation bug) would otherwise panic on
+        // Instant arithmetic underflow. Fall back to `now` so the worst
+        // case is losing the historical first_seen, not crashing boot.
+        let first_seen = now
+            .checked_sub(std::time::Duration::from_millis(first_delta_ms))
+            .unwrap_or(now);
+        let last_seen = now
+            .checked_sub(std::time::Duration::from_millis(last_delta_ms))
+            .unwrap_or(now);
 
         let pattern = Pattern {
             id: p.id,
@@ -205,8 +222,14 @@ fn build_var_stats(vars: &[StateVar]) -> SmallVec<[crate::engine::pattern::VarSt
     let mut out: SmallVec<[crate::engine::pattern::VarStats; 8]> = SmallVec::new();
     for v in vars {
         let mut vs = crate::engine::pattern::VarStats::new(v.ty);
-        for (val, _c) in &v.top {
-            vs.observe(val);
+        // Restore each exemplar with its saved count. The old code
+        // called `observe(val)` once per entry, which clobbered the
+        // historical count to 1 — breaking cross-correlation and
+        // ModSec triage across restarts.
+        if let Some(exact) = vs.exact.as_mut() {
+            for (val, c) in &v.top {
+                exact.insert(CompactString::new(val), *c);
+            }
         }
         vs.total = v.total;
         out.push(vs);

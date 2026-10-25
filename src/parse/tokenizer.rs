@@ -21,14 +21,19 @@ use crate::types::TokenType;
 pub fn classify<'a>(line: &'a str, out: &mut Vec<Token<'a>>) {
     out.clear();
     for raw in line.split_ascii_whitespace() {
-        let piece = strip_wrapping_punct(raw);
+        let (piece, bracketed) = strip_wrapping_punct(raw);
         if piece.is_empty() || contains_control(piece) {
             continue;
         }
-        out.push(Token {
-            ty: classify_one(piece),
-            text: piece,
-        });
+        let ty = if bracketed && looks_like_uptime(piece) {
+            // `[1.319177]`, `[    41.316966]` only — a bare numeric
+            // decimal in the middle of a line stays NUM so a latency
+            // value like `latency=0.123456` doesn't collapse to DATE.
+            TokenType::Date
+        } else {
+            classify_one(piece)
+        };
+        out.push(Token { ty, text: piece });
     }
 }
 
@@ -38,15 +43,66 @@ fn contains_control(s: &str) -> bool {
         .any(|b| b < 0x20 && b != b'\t' || b == 0x7f /* DEL */)
 }
 
-/// Strip wrapping punctuation from both ends, so bracketed stamps like
-/// `[1.319177]`, parenthesised ids like `(abc-def)` and trailing
-/// clause-enders become classifiable. URLs/paths are already caught
-/// by their leading-slash/scheme predicates, so stripping outer
-/// `[({<"'` won't disturb them.
+/// Strip at most one leading bracket/quote and at most one trailing
+/// bracket/quote, then strip trailing clause-enders. Returns the
+/// stripped slice plus a flag telling the caller whether a *square*
+/// bracket was adjacent on either side — the uptime-float heuristic
+/// consults that flag so only bracketed decimals (dmesg stamps) are
+/// treated as dates.
+///
+/// Treats leading and trailing independently because dmesg's padded
+/// format `[    1.319177]` is whitespace-split into `[` and
+/// `1.319177]`: neither token is wrapped as a pair, but each has a
+/// bracket on one side.
+///
+/// The old iterative `trim_matches` version stripped repeatedly and
+/// mangled nested punctuation; this one strips at most one from each
+/// end so `[text](url)` becomes `text](url`, `[1,2,3]` becomes
+/// `1,2,3`, and `[abc` (unmatched) stays `[abc` only in the sense
+/// that it's reported as bracketed on the left.
 #[inline]
-fn strip_wrapping_punct(s: &str) -> &str {
-    s.trim_matches(['[', ']', '(', ')', '{', '}', '<', '>', '"', '\''])
-        .trim_end_matches(['.', ',', ';', ':', '!', '?'])
+fn strip_wrapping_punct(s: &str) -> (&str, bool) {
+    let bytes = s.as_bytes();
+    let (mut start, mut end) = (0usize, bytes.len());
+    let mut bracketed = false;
+    if end > start {
+        match bytes[start] {
+            b'[' => {
+                bracketed = true;
+                start += 1;
+            }
+            b'(' | b'{' | b'<' | b'"' | b'\'' => start += 1,
+            _ => {}
+        }
+    }
+    if end > start {
+        match bytes[end - 1] {
+            b']' => {
+                bracketed = true;
+                end -= 1;
+            }
+            b')' | b'}' | b'>' | b'"' | b'\'' => end -= 1,
+            _ => {}
+        }
+    }
+    let unwrapped = &s[start..end];
+    let trimmed = unwrapped.trim_end_matches(['.', ',', ';', ':', '!', '?']);
+    (trimmed, bracketed)
+}
+
+/// Dmesg-style monotonic uptime stamp: `digits.digits` with 4+
+/// fractional digits. Only invoked when the raw token was surrounded
+/// by `[…]` so we don't fold ordinary high-precision decimals.
+fn looks_like_uptime(s: &str) -> bool {
+    let s = s.trim_start_matches(' ');
+    if let Some(dot) = s.find('.') {
+        let (int, frac) = (&s[..dot], &s[dot + 1..]);
+        return !int.is_empty()
+            && frac.len() >= 4
+            && int.bytes().all(|b| b.is_ascii_digit())
+            && frac.bytes().all(|b| b.is_ascii_digit());
+    }
+    false
 }
 
 /// Classify a single whitespace-delimited piece.
@@ -197,7 +253,9 @@ fn is_date_like(s: &str) -> bool {
             .chain(&s.as_bytes()[6..8])
             .all(|b| b.is_ascii_digit());
     }
-    // HH:MM:SS.sss or HH:MM:SS,sss  (common in syslog/apps)
+    // HH:MM:SS.sss or HH:MM:SS,sss  (common in syslog/apps). The
+    // fractional tail must be digits — the old implementation only
+    // validated positions 0..8, so `12:34:56.foo` passed.
     if s.len() >= 10
         && s.as_bytes()[2] == b':'
         && s.as_bytes()[5] == b':'
@@ -205,22 +263,13 @@ fn is_date_like(s: &str) -> bool {
     {
         return s.as_bytes()[0..2].iter().all(|b| b.is_ascii_digit())
             && s.as_bytes()[3..5].iter().all(|b| b.is_ascii_digit())
-            && s.as_bytes()[6..8].iter().all(|b| b.is_ascii_digit());
+            && s.as_bytes()[6..8].iter().all(|b| b.is_ascii_digit())
+            && s.as_bytes()[9..].iter().all(|b| b.is_ascii_digit());
     }
-    // Kernel / dmesg uptime stamp: digits '.' digits with microsecond
-    // precision. Examples: `1.319177`, `41.316966`, `12345.678901`.
-    // Require exactly one dot and 6+ fractional digits so plain decimals
-    // (`1.5`, `3.14159`) stay NUM.
-    if let Some(dot) = s.find('.') {
-        let (int, frac) = (&s[..dot], &s[dot + 1..]);
-        if !int.is_empty()
-            && frac.len() >= 6
-            && int.bytes().all(|b| b.is_ascii_digit())
-            && frac.bytes().all(|b| b.is_ascii_digit())
-        {
-            return true;
-        }
-    }
+    // Note: dmesg uptime `[1.319177]` is detected in `classify()` via
+    // `looks_like_uptime` + a bracketed-raw guard. We don't attempt to
+    // match it here because a bare decimal like `latency=0.123456`
+    // would otherwise collapse to {DATE} and erase the measurement.
     // syslog-style month abbrev (Oct, Nov, …) is a plain WORD; the day/time
     // tokens following are caught by the HH:MM:SS branch above.
     false
@@ -312,7 +361,7 @@ mod tests {
 
     #[test]
     fn wrapping_brackets_stripped() {
-        assert_eq!(classify_one("[192.168.1.1]"), TokenType::Word); // not stripped by classify_one
+        assert_eq!(classify_one("[192.168.1.1]"), TokenType::Word); // classify_one doesn't strip
         let mut buf = Vec::new();
         classify("peer [192.168.1.1] joined", &mut buf);
         let got: Vec<_> = buf.iter().map(|t| (t.ty, t.text)).collect();
@@ -331,6 +380,53 @@ mod tests {
         // Short-fraction decimals must NOT be classified as Date.
         assert_eq!(classify_one("1.5"), TokenType::Word);
         assert_eq!(classify_one("3.14159"), TokenType::Word);
+        // Even a long-fraction decimal is Word if it's not bracketed —
+        // the regression this guards is a measurement like `latency=0.123456`
+        // being folded to {DATE} and erasing the number.
+        assert_eq!(classify_one("0.123456"), TokenType::Word);
+        assert_eq!(classify_one("34.1234567"), TokenType::Word);
+    }
+
+    #[test]
+    fn uptime_requires_brackets() {
+        let mut buf = Vec::new();
+        // Bracketed: Date.
+        classify("[1.319177] kernel ok", &mut buf);
+        let types: Vec<_> = buf.iter().map(|t| t.ty).collect();
+        assert_eq!(types[0], TokenType::Date);
+        // Un-bracketed: Word.
+        classify("latency 1.319177 ms", &mut buf);
+        let types: Vec<_> = buf.iter().map(|t| t.ty).collect();
+        assert_eq!(types[1], TokenType::Word);
+    }
+
+    #[test]
+    fn hhmmss_fractional_tail_validated() {
+        // Pre-fix bug: `12:34:56.foo` passed the HH:MM:SS.sss branch.
+        assert_eq!(classify_one("12:34:56.foo"), TokenType::Word);
+        assert_eq!(classify_one("12:34:56.789"), TokenType::Date);
+    }
+
+    #[test]
+    fn strip_wrapping_once_only() {
+        // Pre-fix bug: iterative trim ate matching pairs greedily and
+        // mangled nested punctuation. `[1,2,3]` must become `1,2,3`,
+        // not `1,2,3` with internal commas also trimmed; `[text](url)`
+        // must become `text](url` (strip only the outer `[` + `]`
+        // when they actually match as a pair, or nothing).
+        let (s, b) = strip_wrapping_punct("[1,2,3]");
+        assert_eq!(s, "1,2,3");
+        assert!(b);
+        // Leading `[` is still stripped and reported bracketed; the
+        // dmesg case `[1.319177` (if ever un-closed) must still fold.
+        let (s, b) = strip_wrapping_punct("[abc");
+        assert_eq!(s, "abc");
+        assert!(b);
+        // `[1.319177]` tolerates leading whitespace inside the brackets
+        // after split_ascii_whitespace, which collapses it anyway.
+        let (s, b) = strip_wrapping_punct("[1.319177]");
+        assert_eq!(s, "1.319177");
+        assert!(b);
     }
 
     #[test]

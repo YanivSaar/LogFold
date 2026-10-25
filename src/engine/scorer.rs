@@ -19,7 +19,7 @@ const SUSPICIOUS_PATHS: &[&str] = &["/tmp/", "/dev/shm/", "/var/tmp/", "/private
 /// `peer_vars` is a flat list of (TokenType, value) tuples drawn from
 /// *other* patterns' top-K; it's used by [`cross_correlation`]. The caller
 /// (`PatternRegistry::score_all`) builds this once per pass.
-pub fn compute_score(snap: &PatternSnapshot, peer_vars: &[(TokenType, &str)]) -> u32 {
+pub fn compute_score(snap: &PatternSnapshot, peer_vars: &[(u64, TokenType, &str)]) -> u32 {
     compute_score_components(snap, peer_vars).total()
 }
 
@@ -49,7 +49,7 @@ impl ScoreBreakdown {
 /// Same as [`compute_score`] but returns the per-component contributions.
 pub fn compute_score_components(
     snap: &PatternSnapshot,
-    peer_vars: &[(TokenType, &str)],
+    peer_vars: &[(u64, TokenType, &str)],
 ) -> ScoreBreakdown {
     ScoreBreakdown {
         frequency: frequency(snap.count),
@@ -83,17 +83,22 @@ fn rate_spike(peak: u32, mean: f32) -> u32 {
     }
 }
 
-fn cross_correlation(snap: &PatternSnapshot, peer_vars: &[(TokenType, &str)]) -> u32 {
+fn cross_correlation(snap: &PatternSnapshot, peer_vars: &[(u64, TokenType, &str)]) -> u32 {
+    // Each peer entry is (owner_pattern_id, type, value) so a pattern
+    // whose own top-K contains an IP/user/email no longer self-matches
+    // and inflates its score by +15 across the whole registry.
     for v in &snap.vars {
         if !matches!(v.ty, TokenType::Ip | TokenType::User | TokenType::Email) {
             continue;
         }
         for (val, _) in &v.top {
-            if peer_vars
-                .iter()
-                .any(|(peer_ty, peer_val)| *peer_ty == v.ty && *peer_val == val.as_str())
-            {
-                return 15;
+            for (owner, peer_ty, peer_val) in peer_vars {
+                if *owner == snap.id {
+                    continue;
+                }
+                if *peer_ty == v.ty && *peer_val == val.as_str() {
+                    return 15;
+                }
             }
         }
     }
@@ -148,7 +153,7 @@ pub fn classify_badge(snap: &PatternSnapshot, score: u32, fold_threshold: u64) -
 /// Build the (TokenType, value) list used by [`compute_score`] for the
 /// cross-correlation pass. We flatten each pattern's top-K entries of
 /// cross-correlatable variable types.
-pub fn build_peer_vars(snaps: &[PatternSnapshot]) -> Vec<(TokenType, &str)> {
+pub fn build_peer_vars(snaps: &[PatternSnapshot]) -> Vec<(u64, TokenType, &str)> {
     let mut out = Vec::new();
     for s in snaps {
         for v in &s.vars {
@@ -156,7 +161,7 @@ pub fn build_peer_vars(snaps: &[PatternSnapshot]) -> Vec<(TokenType, &str)> {
                 continue;
             }
             for (val, _) in &v.top {
-                out.push((v.ty, val.as_str()));
+                out.push((s.id, v.ty, val.as_str()));
             }
         }
     }
@@ -231,8 +236,29 @@ mod tests {
             }],
             ..mk_snap(5, Severity::Info)
         };
-        let peers = vec![(TokenType::Ip, "1.2.3.4")];
+        // Peer owner id 99 is NOT the pattern we're scoring (id 1),
+        // so the match counts.
+        let peers = vec![(99u64, TokenType::Ip, "1.2.3.4")];
         let score = compute_score(&s, &peers);
         assert!(score >= 15);
+    }
+
+    #[test]
+    fn cross_correlation_does_not_self_match() {
+        // Pattern id 1 has 1.2.3.4 in its own top-K. A peer list that
+        // includes that same (owner=1, Ip, 1.2.3.4) must NOT count,
+        // because that's the pattern being scored.
+        let s = PatternSnapshot {
+            vars: vec![VarStatsSnapshot {
+                ty: TokenType::Ip,
+                distinct_approx: 1,
+                total: 1,
+                top: vec![(CompactString::new("1.2.3.4"), 1)],
+            }],
+            ..mk_snap(50, Severity::Info)
+        };
+        let peers = vec![(s.id, TokenType::Ip, "1.2.3.4")];
+        let b = compute_score_components(&s, &peers);
+        assert_eq!(b.cross_correlation, 0, "self-match leaked back in");
     }
 }

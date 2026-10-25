@@ -157,16 +157,41 @@ impl Pattern {
             })
             .collect();
 
-        // Snapshot the rate-bucket ring in chronological order. The
-        // raw ring is indexed `(epoch % RATE_BUCKETS)`, so to walk it
-        // oldest-to-newest we start one past the current epoch index.
+        // Snapshot the rate-bucket ring in chronological order AT WALL
+        // CLOCK. The old code indexed off `last_bucket_epoch`, so a
+        // pattern that went quiet 3h ago kept showing its historical
+        // peak forever and the "last 2h" ribbon was really "the last
+        // 2h in which it was active." Compute the current epoch from
+        // Instant::now(); any bucket whose stored epoch falls outside
+        // the ring is now stale and must read as zero.
+        let now = Instant::now();
+        let current_epoch = now.saturating_duration_since(self.first_seen).as_secs() / BUCKET_SECS;
         let last_epoch = self.last_bucket_epoch.load(Ordering::Relaxed);
-        let current_idx = (last_epoch as usize) % RATE_BUCKETS;
+        let current_idx = (current_epoch as usize) % RATE_BUCKETS;
         let mut rate_buckets = [0u32; RATE_BUCKETS];
         for (out_i, slot) in rate_buckets.iter_mut().enumerate() {
             let src_i = (current_idx + 1 + out_i) % RATE_BUCKETS;
-            *slot = self.rate_buckets[src_i].load(Ordering::Relaxed);
+            // Reconstruct the epoch this slot would hold if it had
+            // been bumped at or before now: slot[out_i] belongs to
+            // epoch (current_epoch - (RATE_BUCKETS-1) + out_i). If
+            // that epoch is older than last_epoch - (RATE_BUCKETS-1),
+            // the bucket is stale and we drop it to zero.
+            let slot_epoch = current_epoch + 1 + out_i as u64;
+            let slot_epoch = slot_epoch.wrapping_sub(RATE_BUCKETS as u64);
+            let fresh = last_epoch >= slot_epoch
+                && last_epoch.saturating_sub(slot_epoch) < RATE_BUCKETS as u64;
+            *slot = if fresh {
+                self.rate_buckets[src_i].load(Ordering::Relaxed)
+            } else {
+                0
+            };
         }
+
+        // Peak + mean derived from the freshness-filtered ring, not
+        // from the raw AtomicU32 cells, so a long-quiet pattern no
+        // longer reports a phantom spike from 3h ago.
+        let peak_bucket = rate_buckets.iter().copied().max().unwrap_or(0);
+        let mean_bucket = rate_buckets.iter().map(|&b| b as f32).sum::<f32>() / RATE_BUCKETS as f32;
 
         PatternSnapshot {
             id: self.id,
@@ -177,8 +202,8 @@ impl Pattern {
             count: self.count.load(Ordering::Relaxed),
             first_seen: self.first_seen,
             last_seen: *self.last_seen.lock(),
-            peak_bucket: self.peak_bucket(),
-            mean_bucket: self.mean_bucket(),
+            peak_bucket,
+            mean_bucket,
             rate_buckets,
             last_bucket_epoch: last_epoch,
             vars,

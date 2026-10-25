@@ -9,13 +9,15 @@
 #![cfg(feature = "watcher")]
 
 use std::fs::{File, Metadata};
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc as std_mpsc;
 use std::time::Duration;
 
 use color_eyre::eyre::{Context, Result};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+
+use crate::ingest::source::read_bounded_line;
 
 /// Emit source lines until `shutdown` fires. Each read-step also issues a
 /// final "end" callback when the file is removed.
@@ -36,8 +38,11 @@ where
         .watch(parent, RecursiveMode::NonRecursive)
         .with_context(|| format!("watching {}", parent.display()))?;
 
-    let mut state = OpenedFile::open(path)?;
-    state.read_to_eof(&mut callback)?;
+    // Seek to end on the initial open so a `--follow` after a one-shot
+    // ingest doesn't replay the file from byte 0 (which would double
+    // every pattern count). Callers that want historical replay should
+    // run a one-shot pass first.
+    let mut state = OpenedFile::open_at_end(path)?;
 
     while !shutdown() {
         match rx.recv_timeout(Duration::from_millis(250)) {
@@ -97,6 +102,14 @@ impl OpenedFile {
         })
     }
 
+    /// Open and seek to EOF — used for the initial follower attach so
+    /// we only emit lines appended after we started watching.
+    fn open_at_end(path: &Path) -> Result<Self> {
+        let mut this = Self::open(path)?;
+        let _ = this.reader.seek(SeekFrom::End(0));
+        Ok(this)
+    }
+
     fn read_to_eof<F: FnMut(&str)>(&mut self, callback: &mut F) -> Result<()> {
         // Detect truncate-in-place rotation: if the current file is shorter
         // than our reader position, seek back to 0.
@@ -113,18 +126,17 @@ impl OpenedFile {
             }
         }
 
-        let mut line = String::new();
+        // read_bounded_line caps at MAX_LINE_BYTES per line so a
+        // rotated-to-binary file or `/dev/urandom` symlink can't OOM
+        // the follower. The one-shot ingest path has always used this
+        // helper; the follower was missing it until now.
+        let mut buf: Vec<u8> = Vec::with_capacity(4096);
         loop {
-            line.clear();
-            let read = self.reader.read_line(&mut line)?;
-            if read == 0 {
-                break;
+            match read_bounded_line(&mut self.reader, &mut buf)? {
+                Some(line) if line.is_empty() => continue,
+                Some(line) => callback(&line),
+                None => break,
             }
-            let trimmed = line.trim_end_matches(['\n', '\r']);
-            if trimmed.is_empty() {
-                continue;
-            }
-            callback(trimmed);
         }
         Ok(())
     }

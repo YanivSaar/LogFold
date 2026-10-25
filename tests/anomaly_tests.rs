@@ -62,7 +62,8 @@ fn cross_correlating_ip_bumps_score() {
             top: vec![(CompactString::new("1.2.3.4"), 50)],
         }],
     );
-    let peers = vec![(TokenType::Ip, "1.2.3.4")];
+    // Peer owner (999) differs from the pattern's id, so the match counts.
+    let peers = vec![(999u64, TokenType::Ip, "1.2.3.4")];
     let with_peer = scorer::compute_score(&s, &peers);
     let without_peer = scorer::compute_score(&s, &[]);
     assert_eq!(with_peer, without_peer + 15);

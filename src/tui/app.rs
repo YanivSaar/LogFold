@@ -22,7 +22,7 @@ use crossterm::terminal::{
 use crossterm::{execute, ExecutableCommand};
 use parking_lot::Mutex;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Clear, Paragraph};
+use ratatui::widgets::{Block, Paragraph};
 
 use crate::engine::pattern::PatternSnapshot;
 use crate::engine::registry::PatternRegistry;
@@ -96,7 +96,7 @@ struct App {
     /// Rebuilt on every refresh. One clone of ~hundreds of short
     /// strings per 500 ms is cheap next to what it replaces (a full
     /// per-render recompute at 20 Hz).
-    peers_owned: Vec<(TokenType, String)>,
+    peers_owned: Vec<(u64, TokenType, String)>,
     reports: Vec<SourceReport>,
     progress: Vec<ProgressHandle>,
     show_help: bool,
@@ -161,11 +161,12 @@ impl App {
         self.overview.selected_row().map(|r| &r.snap)
     }
 
-    fn status_line(&self) -> String {
+    /// Build the three-cell status bar as (left, middle, right).
+    /// Each cell truncates independently so a long bundle name on the
+    /// left can't push the key-hints off the right.
+    fn status_cells(&self) -> (String, String, String) {
         let completed_lines: u64 = self.reports.iter().map(|r| r.lines).sum();
         let in_flight: u64 = self.progress.iter().map(|h| h.progress.load()).sum();
-        // In-flight counters are reset to the final count once the
-        // SourceReport lands, so showing the max avoids double-count.
         let total_lines = completed_lines.max(in_flight);
         let bundle_summary = self
             .reports
@@ -177,25 +178,34 @@ impl App {
                     .map(|h| format!("ingesting ({})", h.source_label))
                     .unwrap_or_else(|| "no sources".to_string())
             });
+
+        let anomalies = self.overview.anomaly_count();
+        let folds = self.overview.rows.len().saturating_sub(anomalies);
         let filter_part = if self.filter_mode {
-            format!("  |  filter: {}_", self.filter)
+            format!("  filter: {}_", self.filter)
         } else if !self.filter.is_empty() {
-            format!("  |  filter: {}", self.filter)
+            format!(
+                "  filter: {} ({} matches)",
+                self.filter,
+                self.overview.rows.len()
+            )
         } else {
             String::new()
         };
-        format!(
-            " {} lines  |  {} patterns  |  {}  |  threshold >= {}{}  |  [?]help [f]ilter [q]uit ",
-            fmt_count(total_lines),
-            self.overview.rows.len(),
-            bundle_summary,
-            self.anomaly_threshold,
-            filter_part,
-        )
+
+        let left = format!(" {} lines  |  {} ", fmt_count(total_lines), bundle_summary);
+        let middle = format!(
+            " anomalies {} / folds {}  |  threshold >= {}{} ",
+            anomalies, folds, self.anomaly_threshold, filter_part,
+        );
+        let right = " [?]help [f]ilter [t/T]threshold [q]uit ".to_string();
+        (left, middle, right)
     }
 
     fn handle_key(&mut self, code: KeyCode, mods: KeyModifiers) {
-        // Help overlay: j/k scrolls; any other key closes.
+        // Help overlay is sticky: only `?`, Esc, q, Ctrl+C close it.
+        // Scroll keys scroll; everything else is a no-op so a user who
+        // bumps a letter while reading doesn't lose their place.
         if self.show_help {
             match code {
                 KeyCode::Char('?') | KeyCode::Esc | KeyCode::Char('q') => {
@@ -214,11 +224,7 @@ impl App {
                     self.help_state.scroll_up();
                     self.dirty = true;
                 }
-                _ => {
-                    self.show_help = false;
-                    self.help_state.reset();
-                    self.dirty = true;
-                }
+                _ => {}
             }
             return;
         }
@@ -293,6 +299,17 @@ impl App {
             KeyCode::Char('G') => self.overview.jump_bottom(),
             KeyCode::Char('n') => self.overview.next_anomaly(self.anomaly_threshold),
             KeyCode::Char('N') => self.overview.prev_anomaly(self.anomaly_threshold),
+            // Live-tune the anomaly threshold. `t` lowers, `T` raises.
+            // Range: 5..=95, step 5. Rebuilds the overview so the
+            // anomalies / folds partition updates immediately.
+            KeyCode::Char('t') => {
+                self.anomaly_threshold = self.anomaly_threshold.saturating_sub(5).max(5);
+                self.rebuild_overview_filter();
+            }
+            KeyCode::Char('T') => {
+                self.anomaly_threshold = (self.anomaly_threshold + 5).min(95);
+                self.rebuild_overview_filter();
+            }
             KeyCode::Char('m') => self.mouse_enabled = !self.mouse_enabled,
             KeyCode::Enter | KeyCode::Right => self.view = View::Detail,
             _ => {}
@@ -399,15 +416,18 @@ impl App {
 /// Build the peer-vars table owning its strings, so the vec can
 /// outlive the snapshot slice it was derived from. `App` stores this
 /// and reconstructs the `&str` view on demand via [`borrow_peers`].
-fn owned_peers(snaps: &[PatternSnapshot]) -> Vec<(TokenType, String)> {
+fn owned_peers(snaps: &[PatternSnapshot]) -> Vec<(u64, TokenType, String)> {
     scorer::build_peer_vars(snaps)
         .into_iter()
-        .map(|(ty, s)| (ty, s.to_string()))
+        .map(|(id, ty, s)| (id, ty, s.to_string()))
         .collect()
 }
 
-fn borrow_peers(owned: &[(TokenType, String)]) -> Vec<(TokenType, &str)> {
-    owned.iter().map(|(ty, s)| (*ty, s.as_str())).collect()
+fn borrow_peers(owned: &[(u64, TokenType, String)]) -> Vec<(u64, TokenType, &str)> {
+    owned
+        .iter()
+        .map(|(id, ty, s)| (*id, *ty, s.as_str()))
+        .collect()
 }
 
 pub fn run(
@@ -480,6 +500,7 @@ fn run_loop(
 
         // Coalesce input: drain everything available in one iteration
         // so a paste or held key doesn't trigger one frame per char.
+        let mut resized = false;
         if event::poll(poll_timeout)? {
             loop {
                 let ev = event::read()?;
@@ -489,11 +510,7 @@ fn run_loop(
                     }
                     Event::Mouse(m) => app.handle_mouse(m.kind),
                     Event::Resize(_, _) => {
-                        // Resize can leave the backing buffer sized to
-                        // the old area, so a full clear ensures the
-                        // new frame starts from an empty terminal and
-                        // we don't inherit garbage from the old layout.
-                        let _ = guard.terminal.clear();
+                        resized = true;
                         app.dirty = true;
                     }
                     _ => {}
@@ -503,6 +520,13 @@ fn run_loop(
                     break;
                 }
             }
+        }
+        // Debounce the full terminal clear: terminals (and tmux, screen)
+        // emit a Resize per drag step, and clearing on each one spammed
+        // redraws and flashed the screen. Clear only once per burst,
+        // after the drain loop above has settled.
+        if resized {
+            let _ = guard.terminal.clear();
         }
 
         app.maybe_apply_pending_filter();
@@ -530,14 +554,13 @@ fn run_loop(
 fn render(frame: &mut Frame<'_>, app: &App) {
     let area = frame.area();
 
-    // Blank the whole frame every tick: ratatui diffs cells against
-    // the prior buffer, but a stale alt-screen (screen/tmux, terminals
-    // that don't honour EnterAlternateScreen) or a view switch that
-    // paints a smaller area than the previous view can leave old cells
-    // on screen. Clear + full-area background block forces every cell
-    // to be rewritten with our theme bg, so shell content and the
-    // previous view can never bleed through.
-    frame.render_widget(Clear, area);
+    // Paint a single background block at theme body-style over the
+    // frame area. This is enough to establish every cell's bg colour
+    // on first draw without defeating ratatui's cell-level diff on
+    // subsequent frames — the old v0.14.2 code pushed a Clear every
+    // tick, which marked the whole buffer dirty every 100 ms and
+    // flickered over SSH / tmux. True first-paint cleanup lives in
+    // TerminalGuard::enter via terminal.clear().
     frame.render_widget(Block::default().style(theme::body_style()), area);
 
     let chunks = Layout::vertical([
@@ -575,7 +598,8 @@ fn render(frame: &mut Frame<'_>, app: &App) {
         View::Timeline => timeline::render(frame, chunks[1], &app.snaps),
     }
 
-    status_bar::render(frame, chunks[2], &app.status_line());
+    let (sl, sm, sr) = app.status_cells();
+    status_bar::render(frame, chunks[2], &sl, &sm, &sr);
 
     if app.show_help {
         helpv::render(frame, area, &app.help_state);

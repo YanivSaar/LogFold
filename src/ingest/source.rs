@@ -492,7 +492,7 @@ fn fold_to_eof<R: BufRead>(
 /// - Returns `None` only at true EOF, never on partial reads.
 /// - Invalid UTF-8 is replaced with U+FFFD; the parser never aborts
 ///   because of a stray non-UTF-8 byte in an otherwise good log.
-fn read_bounded_line<R: BufRead>(
+pub(crate) fn read_bounded_line<R: BufRead>(
     reader: &mut R,
     buf: &mut Vec<u8>,
 ) -> std::io::Result<Option<String>> {
